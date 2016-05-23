@@ -33,3 +33,4 @@ my-build
 func_tests/last.log
 */__pycache__/
 */.idea
+.idea
