@@ -1,0 +1,19 @@
+cmake_minimum_required(VERSION 2.6)
+set(PROJECT sdf)
+set(VERSION 0.0.0)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall")
+
+
+set(AIGER_INCLUDE_DIR    $ENV{SDF_TP}/aiger-1.9.4/)
+set(AIGER_LIBRARIES      $ENV{SDF_TP}/aiger-1.9.4/aiger.o)
+set(CUDD_INCLUDE_DIR   $ENV{SDF_TP}/cudd/cudd/ $ENV{SDF_TP}/cudd/cplusplus/)
+set(CUDD_LIBRARIES   $ENV{SDF_TP}/cudd/cudd/.libs/libcudd.a)
+
+add_subdirectory(src)
+
+enable_testing()
+add_subdirectory(func_tests)
+
+## how are shared libraries found ?    ## AK: should it be in the beginning?
+set(LD_LIB_VAR "LD_LIBRARY_PATH")
