@@ -28,3 +28,8 @@ my-build
 *.exe
 *.out
 *.app
+
+# 
+func_tests/last.log
+*/__pycache__/
+*/.idea
