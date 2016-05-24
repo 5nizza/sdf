@@ -31,7 +31,7 @@ def is_realizable(test):
 
 
 def run_tool(test_file, result_file, tool_args:str):
-    cmd_run = TOOL_EXEC + ' ' + test_file + ' -o ' + result_file + ' ' + tool_args
+    cmd_run = TOOL_EXEC + ' ' + test_file + ' ' + result_file + ' ' + tool_args
     logger.debug('executing: ' + cmd_run)
     return execute_shell(cmd_run)
 
