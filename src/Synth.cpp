@@ -1,10 +1,16 @@
+#include <iostream>
+#include <spdlog/spdlog.h>
+
 #include "Synth.hpp"
-#include "Logger.hpp"
+#include "Timer.hpp"
 
 
 #define IS_NEGATED(l) ((l & 1) == 1)
 #define STRIP_LIT(lit) (lit & ~1)
 #define NEGATED(lit) (lit ^ 1)
+
+
+#define L_INF(message) {spdlog::get("console")->info() << message;}
 
 
 BDD Synth::get_bdd_for_value(unsigned lit) {
@@ -338,8 +344,8 @@ bool Synth::run() {
     L_INF("synthesize..");
 
     introduce_error_bdd();
-    compose_init_state_bdd();
-    compose_transition_vector();
+    compose_init_state_bdd();                                   Timer timer;
+    compose_transition_vector();                                L_INF("compose_transition_vector took (sec): " << timer.sec_restart());
 
 //  time_t t;
 //  struct tm * now;
@@ -388,18 +394,21 @@ bool Synth::run() {
 //  std::cout << this->cudd.OrderString() << std::endl;
 //  exit(0);
 
-    BDD win_region = calc_win_region();
+    BDD win_region = calc_win_region();                            L_INF("calc_win_region took (sec): " << timer.sec_restart());
 
     if (win_region.IsZero())
         return 0;
 
-    BDD non_det_strategy = get_nondet_strategy(win_region);
-    // win_region = cudd.bddZero();  // TODO: kill refs to non-needed BDDs
-    vector<BDD> models = extract_output_funcs(non_det_strategy);
-    vector<BDD> c_signals = get_controllable_vars_bdds();
+    BDD non_det_strategy = get_nondet_strategy(win_region);        L_INF("get_nondet_strategy took (sec): " << timer.sec_restart());
 
+    // win_region = cudd.bddZero();  // TODO: kill refs to non-needed BDDs
+
+    vector<BDD> models = extract_output_funcs(non_det_strategy);   L_INF("extract_output_funcs took (sec): " << timer.sec_restart());
+
+    vector<BDD> c_signals = get_controllable_vars_bdds();
     for (unsigned i = 0; i < models.size(); ++i)
         model_to_aiger(c_signals[i], models[i]);
+                                                                   L_INF("model_to_aiger took (sec): " << timer.sec_restart());
 
     int res = (output_file_name == "stdout") ?  //TODO: magic constant
               aiger_write_to_file(aiger_spec, aiger_ascii_mode, stdout) :

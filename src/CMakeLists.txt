@@ -8,6 +8,7 @@ foreach(fil ${project_FILES})
   endif(NOT ${fil} MATCHES main.cpp)
 endforeach(fil)
 
+include_directories("${SPDLOG_INCLUDE_DIR}")
 include_directories("${AIGER_INCLUDE_DIR}")
 include_directories("${CUDD_INCLUDE_DIR}")
 

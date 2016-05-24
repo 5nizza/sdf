@@ -2,8 +2,12 @@
 // Created by ayrat on today.
 //
 
-#ifndef SDF_BDDSYNTH_H
-#define SDF_BDDSYNTH_H
+#ifndef SDF_SYNTH_H
+#define SDF_SYNTH_H
+
+
+#include <string>
+#include <tr1/unordered_map>
 
 
 extern "C" {
@@ -12,9 +16,7 @@ extern "C" {
 };
 
 #include "cuddObj.hh"
-
-#include <string>
-#include <tr1/unordered_map>
+#include "myassert.hpp"
 
 
 using namespace std;
@@ -82,4 +84,4 @@ private:
 };
 
 
-#endif //SDF_BDDSYNTH_H
+#endif //SDF_SYNTH_H
