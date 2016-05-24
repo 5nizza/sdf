@@ -34,3 +34,4 @@ func_tests/last.log
 */__pycache__
 */.idea
 .idea
+setup.sh
