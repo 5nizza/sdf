@@ -20,7 +20,6 @@ int main (int argc, char *argv[]) {
 
     Synth synthesizer(input_file_name, output_file_name);
     bool is_realizable = synthesizer.run();
-    if (is_realizable)
-        return 10;
-    return 20;
+
+    return is_realizable? 10:20;
 }
