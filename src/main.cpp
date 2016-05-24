@@ -1,6 +1,6 @@
 #include <fstream>
 #include "Logger.hpp"
-#include "BddSynth.hpp"
+#include "Synth.hpp"
 
 
 
@@ -18,7 +18,7 @@ int main (int argc, char *argv[]) {
     string input_file_name = argv[1];
     string output_file_name = (argc == 3) ? argv[2]:"stdout";
 
-    BddSynth synthesizer(input_file_name, output_file_name);
+    Synth synthesizer(input_file_name, output_file_name);
     bool is_realizable = synthesizer.run();
     if (is_realizable)
         return 10;
