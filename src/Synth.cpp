@@ -410,6 +410,8 @@ bool Synth::run() {
         model_to_aiger(c_signals[i], models[i]);
                                                                    L_INF("model_to_aiger took (sec): " << timer.sec_restart());
 
+                                                                   L_INF("circuit size: " << (aiger_spec->num_ands + aiger_spec->num_latches));
+
     int res = (output_file_name == "stdout") ?  //TODO: magic constant
               aiger_write_to_file(aiger_spec, aiger_ascii_mode, stdout) :
               aiger_open_and_write_to_file(aiger_spec, output_file_name.c_str());
