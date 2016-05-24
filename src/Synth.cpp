@@ -25,9 +25,7 @@ BDD Synth::get_bdd_for_value(unsigned lit) {
         res = get_bdd_for_value(and_->rhs0) & get_bdd_for_value(and_->rhs1);
     }
 
-    if (IS_NEGATED(lit))
-        return !res;
-    return res;
+    return IS_NEGATED(lit) ? !res:res;
 }
 
 
