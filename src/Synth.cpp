@@ -412,9 +412,14 @@ bool Synth::run() {
 
                                                                    L_INF("circuit size: " << (aiger_spec->num_ands + aiger_spec->num_latches));
 
-    int res = (output_file_name == "stdout") ?  //TODO: magic constant
-              aiger_write_to_file(aiger_spec, aiger_ascii_mode, stdout) :
-              aiger_open_and_write_to_file(aiger_spec, output_file_name.c_str());
+    int res = 1;
+    if (output_file_name == "stdout")
+        res = aiger_write_to_file(aiger_spec, aiger_ascii_mode, stdout);
+    else if (!output_file_name.empty()) {
+        L_INF("writing a model to " << output_file_name);
+        res = aiger_open_and_write_to_file(aiger_spec, output_file_name.c_str());
+    }
+
     MASSERT(res, "Could not write result file");
 
     return 1;
