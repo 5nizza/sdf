@@ -1,7 +1,6 @@
 #include <fstream>
 #include <iostream>
 
-
 #include <spdlog/spdlog.h>
 
 #include "Synth.hpp"
@@ -11,10 +10,10 @@ using namespace std;
 
 
 void print_usage_exit(){
-    cout << "Run: sdf input_aiger_file [-o output_file]" << endl;
-    cout << "-o output_file      is optional: if output_file=stdout,"
-            "                    then model is printed to stdout."
-            "                    If not given, then model is calculated, but not output." << endl;
+    cout << "sdf input_aiger_file [-o output_file]" << endl;
+    cout << "-o output_file      is optional: if output_file=stdout," << endl
+         << "                    then model is printed to stdout." << endl
+         << "                    If not given, then model is calculated, but not output." << endl;
     exit(0);
 }
 
@@ -35,14 +34,14 @@ int main (int argc, char *argv[]) {
         output_file_name = argv[3];
     }
 
-
     // setup logging
-    auto console = spdlog::stdout_logger_mt("console", true);
+    auto console = spdlog::stdout_logger_mt("console", false);
     spdlog::set_pattern("%H:%M:%S %v ");
     // end of logger setup
 
-    Synth synthesizer(input_file_name, output_file_name);  //TODO: current: account for "" and "stdout"
+    Synth synthesizer(input_file_name, output_file_name, false);  //TODO: current: account for "" and "stdout"
     bool is_realizable = synthesizer.run();
 
+    cout << (is_realizable ? "realizable":"unrealizable") << endl;
     return is_realizable? 10:20;
 }

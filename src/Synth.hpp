@@ -11,12 +11,13 @@
 
 
 extern "C" {
-#include "aiger.h"
-#include "cudd.h"
+#include <aiger.h>
+#include <cudd.h>
 };
 
-#include "cuddObj.hh"
+#include <cuddObj.hh>
 #include "myassert.hpp"
+#include "Timer.hpp"
 
 
 using namespace std;
@@ -25,7 +26,7 @@ using namespace std;
 class Synth {
 
 public:
-    Synth(const string &aiger_file_name, const string &output_file_name);
+    Synth(const string &aiger_file_name, const string &output_file_name, bool calc_init_order);
     bool run(); // -> returns 'is realizable'
 
 
@@ -35,9 +36,11 @@ private:
 
 
 private:
+    Timer timer;
     Cudd cudd;
     aiger *aiger_spec;
     const string &output_file_name;
+    bool calc_init_order;
 
     tr1::unordered_map<unsigned , BDD> transition_rel;
     BDD init;
@@ -54,7 +57,7 @@ private:
     vector<BDD> get_controllable_vars_bdds();
     vector<BDD> get_uncontrollable_output_bdds();
 
-    vector<BDD> get_bdd_vars(int (*filter_func)(char *));
+    vector<BDD> get_bdd_vars(bool(*filter_func)(char *));
 
     void introduce_error_bdd();
 
