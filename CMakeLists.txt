@@ -11,7 +11,7 @@ set(AIGER_INCLUDE_DIR    "$ENV{SDF_TP}/aiger-1.9.4/")
 set(AIGER_LIBRARIES      "$ENV{SDF_TP}/aiger-1.9.4/aiger.o")
 #set(CUDD_INCLUDE_DIR   "$ENV{SDF_TP}/cudd/cudd/" "$ENV{SDF_TP}/cudd/obj/" "$ENV{SDF_TP}/cudd/mtr/" "$ENV{SDF_TP}/cudd/epd/" "$ENV{SDF_TP}/cudd/util/")
 #set(CUDD_LIBRARIES    "$ENV{SDF_TP}/cudd/obj/libobj.a" "$ENV{SDF_TP}/cudd/cudd/libcudd.a" "$ENV{SDF_TP}/cudd/mtr/libmtr.a" "$ENV{SDF_TP}/cudd/epd/libepd.a" "$ENV{SDF_TP}/cudd/util/libutil.a" "$ENV{SDF_TP}/cudd/st/libst.a")
-set(CUDD_INCLUDE_DIR   $ENV{SDF_TP}/cudd-3.0.0/cudd/ $ENV{SDF_TP}/cudd-3.0.0/cplusplus/)
+set(CUDD_INCLUDE_DIR   $ENV{SDF_TP}/cudd-3.0.0/cudd/ $ENV{SDF_TP}/cudd-3.0.0/cplusplus/ $ENV{SDF_TP}/cudd-3.0.0/mtr/)
 set(CUDD_LIBRARIES   $ENV{SDF_TP}/cudd-3.0.0/cudd/.libs/libcudd.a)
 
 add_subdirectory(src)

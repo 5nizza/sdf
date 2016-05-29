@@ -23,12 +23,12 @@ public:
     }
 
     aiger* spec;
-    unordered_map<unsigned, unordered_set<unsigned > > deps;
+    unordered_map<unsigned, unordered_set<unsigned> > deps;
     unordered_map<unsigned, unsigned> freq_map;
 
     unordered_set<unsigned>
-            get_deps(unsigned lit, aiger* spec) {
-        auto stripped_lit = STRIP_LIT(lit & ~1);
+    get_deps(unsigned lit, aiger* spec) {
+        auto stripped_lit = STRIP_LIT(lit);
 
         if (deps.find(stripped_lit) == deps.end()) {
             auto and_ = aiger_is_and(spec, stripped_lit);                       MASSERT(and_, "impossible");
@@ -46,7 +46,7 @@ public:
     }
 
     void compute_deps() {
-        deps[0] = unordered_set<unsigned>();  // value 'false'
+        deps[0] = unordered_set<unsigned>();  // value 'false' (need to insert this value, since we later call 'find')
 
         for (unsigned i=0; i < spec->num_latches; ++i)
             deps[spec->latches[i].lit].insert(spec->latches[i].lit);
@@ -84,8 +84,24 @@ public:
 //     TODO:
 //    void distance(unsigned lit1, unsigned lit2) { }
 //
-//     TODO:
-//    void dump_dot(string file_name) { }
+    void dump_dot() {
+        cout << "digraph latch_graph { rankdir=BT;" << endl;
+
+        for (unsigned i=0; i < spec->num_inputs; i++)
+            cout << spec->inputs[i].lit << "[shape=triangle];" << endl;
+        for (unsigned i=0; i < spec->num_latches; i++)
+            cout << spec->latches[i].lit << "[shape=diamond, color=magenta];" << endl;
+        cout << STRIP_LIT(spec->outputs[0].lit) << "[shape=triangle, color=blue];" << endl;
+
+        for (unsigned i=0; i < spec->num_latches; i++)
+            for (auto const & src : deps[STRIP_LIT(spec->latches[i].next)])
+                cout << src << "->" << spec->latches[i].lit << ";" << endl;
+
+        for (auto const & src : deps[STRIP_LIT(spec->outputs[0].lit)])
+            cout << src << "->" << STRIP_LIT(spec->outputs[0].lit) << ";" << endl;
+
+        cout << "}" << endl;
+    }
 //    void dump_order(string file_name) { }
 };
 
@@ -102,7 +118,8 @@ BDD Synth::get_bdd_for_value(unsigned lit) {
     }
     else if (aiger_is_input(aiger_spec, stripped_lit) ||
              aiger_is_latch(aiger_spec, stripped_lit)) {
-        res = cudd.bddVar(stripped_lit/2);  /*internal mapping of `interfaces'*/
+        res = cudd.ReadVars(stripped_lit/2);  // internal cudd mapping (we don't need to create the var, so I use ReadVars)
+        MASSERT(res.NodeReadIndex() == stripped_lit/2, "that bug again: impossible: " << res.NodeReadIndex() << " vs " << stripped_lit/2 );
     }
     else { // aiger_and
         aiger_and *and_ = aiger_is_and(aiger_spec, stripped_lit);
@@ -148,7 +165,7 @@ void Synth::introduce_error_bdd() {
 
 
 BDD Synth::make_bdd_eq(BDD first, BDD second) {
-    return (first & second) | (~first & ~second);
+    return ~(first.Xor(second));
 }
 
 
@@ -189,61 +206,78 @@ BDD Synth::pre_sys(BDD dst) {
 
     dst = dst.VectorCompose(get_substitution());
 
-    BDD result = ~error & dst;
-
     vector<BDD> controllable = get_controllable_vars_bdds();
 
-    auto bdds = get_bdd_vars(starts_with_controllable);
-    for (unsigned i = 0; i < bdds.size(); ++i) {
-        aiger_symbol* s = aiger_is_input(aiger_spec, controllable[i].NodeReadIndex()*2);
-        MASSERT(s, "");
-    }
+    MASSERT(!controllable.empty(), "");
 
-    for (unsigned i = 0; i< controllable.size(); ++i) {
-//        cout << " node var index " << controllable[i].NodeReadIndex() << endl;// var indices correct
-        aiger_symbol* s = aiger_is_input(aiger_spec, controllable[i].NodeReadIndex()*2);
-        MASSERT(s, "");
-//        cout << "aiger name is " << s->name << endl;
-
-//        controllable[i].PrintMinterm();
-//        cout << endl;
-//        if (controllable[i].NodeReadIndex() == 34) {
-//            cout << "on the other hand: 34 is" << endl;
-//            get_bdd_for_value(34).PrintMinterm();
-//            cout << endl;
-//            cout << "finally: " << (get_bdd_for_value(34) == controllable[i]) << endl;
-//            cout << "finally~: " << (get_bdd_for_value(34) == ~controllable[i]) << endl;
-//        }
-    }
-
-    if (!controllable.empty()) {
-        // ∃c ~error & dst[new_t]
-        BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());   //TODO: cache this?
-        result = result.ExistAbstract(vars_cube);  // TODO: use AndAbstract
-    }
-    // else stays the same
+    // ∃c ~error & dst[new_t]
+    BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
+    BDD result = dst.AndAbstract(~error, vars_cube);
 
     vector<BDD> uncontrollable = get_uncontrollable_output_bdds();
     if (!uncontrollable.empty()) {
         // ∀u ∃c ~error & dst[new_t]
-        BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());  //TODO: cache this?
+        BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
         result = result.UnivAbstract(uncontrollable_cube);
     }
-    // else stays the same
 
     return result;
 }
 
 vector<BDD> Synth::get_substitution() {
-    vector<BDD> substitution;   // TODO: cache this?
+    vector<BDD> substitution;
 
-    for (unsigned i=0; i < (unsigned)cudd.ReadSize(); ++i)
+    substitution.push_back(cudd.ReadVars(0));   // special variable
+    for (unsigned i=1; i < (unsigned)cudd.ReadSize(); ++i) {
         if (aiger_is_latch(aiger_spec, i*2))
-            substitution.push_back(transition_rel[i*2]);
+            substitution.push_back(transition_rel.find(i*2)->second);
         else
-            substitution.push_back(cudd.bddVar(i));
+            substitution.push_back(cudd.ReadVars(i));
+    }
 
     return substitution;
+}
+
+
+vector<string> &split(const string &s, char delim, vector<string> &elems) {
+    stringstream ss(s);
+    string item;
+    while (getline(ss, item, delim)) {
+        elems.push_back(item);
+    }
+    return elems;
+}
+
+vector<string> split(const string &s, char delim) {
+    vector<string> elems;
+    split(s, delim, elems);
+    return elems;
+}
+
+
+void print_aiger_like_order(const Cudd& cudd) {
+    string best_order = cudd.OrderString();
+    auto str_vars = split(best_order, ' ');                                 MASSERT(str_vars.size() == (unsigned) cudd.ReadSize(), "");
+    for (auto const & str_v : str_vars)
+        cout << stoi(str_v.substr(1))*2 << " ";
+    cout << endl;
+}
+
+
+void reorder_opt(Cudd& cudd) {                                              L_INF("reorder_opt, original size: " << cudd.ReadNodeCount());
+    int count = 0;                                                          Timer timer;
+    while (count != cudd.ReadNodeCount()) {
+        count = (int) cudd.ReadNodeCount();
+        cudd.ReduceHeap(CUDD_REORDER_SIFT_CONVERGE, 0);                     L_INF("REORDERING: SIFT_CONV: SIZE: " << cudd.ReadNodeCount());
+    }                                                                       L_INF("first reordering while took (sec): " << timer.sec_restart());
+
+    // now add annealing
+    count = 0;
+    while (count != cudd.ReadNodeCount()) {
+        count = (int) cudd.ReadNodeCount();
+        cudd.ReduceHeap(CUDD_REORDER_ANNEALING, 0);                           L_INF("REORDERING: ANNLNG: SIZE: " << cudd.ReadNodeCount());
+        cudd.ReduceHeap(CUDD_REORDER_SIFT_CONVERGE, 0);                       L_INF("REORDERING: SIFT_CONV: SIZE: " << cudd.ReadNodeCount());
+    }                                                                         L_INF("second reordering while took (sec): " << timer.sec_restart());
 }
 
 
@@ -252,10 +286,8 @@ BDD Synth::calc_win_region() {
         :return: BDD representing the winning region
     **/
 
-    L_INF("calc_win_region..");
-
     BDD new_ = cudd.bddOne();
-    while (1) {
+    for (unsigned i = 1; ; ++i) {                                             L_INF("calc_win_region: iteration " << i << "..");
         BDD curr = new_;
 
         new_ = pre_sys(curr);
@@ -265,6 +297,8 @@ BDD Synth::calc_win_region() {
 
         if (new_ == curr)
             return new_;
+
+        //TODO: after the first/second iteration do expensive reordering? and build groups?
     }
 }
 
@@ -306,12 +340,12 @@ vector<BDD> Synth::extract_output_funcs(BDD nondet_strategy) {
         aiger_symbol *aiger_input = aiger_is_input(aiger_spec, STRIP_LIT(controls[i].NodeReadIndex()*2));
         L_INF("getting output function for " << aiger_input->name);
 
-        // TODO: beautify: the current control is [0], others = [1..]
+        // the current control is [0], others = [1..]
         swap(controls[0], controls[i]);
         BDD c = controls[0];
 
         BDD c_arena;
-        if (controls.size()) {
+        if (controls.size() >= 2) {
             BDD cube = cudd.bddComputeCube(&controls[1], NULL, (int) (controls.size() - 1));
             c_arena = nondet_strategy.ExistAbstract(cube);
         }
@@ -349,7 +383,7 @@ vector<BDD> Synth::extract_output_funcs(BDD nondet_strategy) {
         BDD c_model = c_must_be_true.Restrict(c_care_set);
         models.push_back(c_model);
 
-        nondet_strategy = nondet_strategy & make_bdd_eq(c, c_model);
+        nondet_strategy = nondet_strategy & make_bdd_eq(c, c_model);   // TODO: call substitute instead
 
         // TODO: add optimization 'variables elimination'
     }
@@ -396,9 +430,18 @@ If a given node requires intermediate AND gates for its representation, the func
 
 :returns: literal representing input node
 */
-unsigned Synth::walk(DdNode *a_dd) {  // TODO: add caching
+unsigned Synth::walk(DdNode *a_dd) {
+    // caching
+    static unordered_map<DdNode*, unsigned> cache;
+    {
+        auto cached_lit = cache.find(Cudd_Regular(a_dd));
+        if (cached_lit != cache.end())
+            return Cudd_IsComplement(a_dd) ? NEGATED(cached_lit->second) : cached_lit->second;
+    }
+    // end of caching
+
     if (Cudd_IsConstant(a_dd))
-        return (unsigned) (a_dd == cudd.bddOne().getNode());  // in aiger: 0 / 1 = False / True
+        return (unsigned) (a_dd == cudd.bddOne().getNode());  // in aiger: 0 is False and 1 is True
 
     // get an index of variable,
     // all variables used in BDDs are also present in AIGER
@@ -422,9 +465,12 @@ unsigned Synth::walk(DdNode *a_dd) {  // TODO: add caching
     unsigned n_a_t_lit = NEGATED(a_t_lit);
     unsigned n_na_e_lit = NEGATED(na_e_lit);
 
-    unsigned ite_lit = get_optimized_and_lit(n_a_t_lit, n_na_e_lit);
+    unsigned and_lit = get_optimized_and_lit(n_a_t_lit, n_na_e_lit);
 
-    unsigned res = NEGATED(ite_lit);
+    unsigned res = NEGATED(and_lit);
+
+    cache[Cudd_Regular(a_dd)] = res;  // caching
+
     if (Cudd_IsComplement(a_dd))
         res = NEGATED(res);
 
@@ -443,36 +489,6 @@ void Synth::model_to_aiger(BDD &c_signal, BDD &func) {
 
 
 bool first_cmp (pair<unsigned, unsigned> a, pair<unsigned, unsigned> b) { return (a.first > b.first); /* > means often-first */ }
-
-
-
-
-
-
-
-
-
-
-
-
-vector<string> &split(const string &s, char delim, vector<string> &elems) {
-    stringstream ss(s);
-    string item;
-    while (getline(ss, item, delim)) {
-        elems.push_back(item);
-    }
-    return elems;
-}
-
-vector<string> split(const string &s, char delim) {
-    vector<string> elems;
-    split(s, delim, elems);
-    return elems;
-}
-
-
-
-
 
 
 void print_order_frequencies(Grapher& grapher, Cudd& cudd, aiger* aiger_spec) {
@@ -499,80 +515,78 @@ void print_order_frequencies(Grapher& grapher, Cudd& cudd, aiger* aiger_spec) {
 
 
 
+vector<int> compute_permutation(Grapher& grapher, Cudd& cudd, aiger* aiger_spec) {
+    /* Assumes the variables are already created. */
 
+    vector<pair<unsigned, unsigned> > freq_lit_vector;
+    for (unsigned i = 0; i < aiger_spec->num_inputs; ++i) {
+        auto lit = aiger_spec->inputs[i].lit;
+        freq_lit_vector.push_back(make_pair(grapher.freq_map[lit], lit));
+    }
+    for (unsigned i = 0; i < aiger_spec->num_latches; ++i) {
+        auto lit = aiger_spec->latches[i].lit;
+        freq_lit_vector.push_back(make_pair(grapher.freq_map[lit], lit));
+    }
 
+    sort(freq_lit_vector.begin(), freq_lit_vector.end(), first_cmp);
 
+    MASSERT(((unsigned)cudd.ReadSize()) == aiger_spec->num_inputs + aiger_spec->num_latches+1, "should not happen");
 
+    unordered_set<unsigned> all_var_indices;
+    for (unsigned i = 0; i < (unsigned)cudd.ReadSize(); ++i)
+        all_var_indices.insert(i);
+
+    vector<int> permutation;
+    for (unsigned i = 0; i < (unsigned)cudd.ReadSize(); ++i) {
+        if (i < (aiger_spec->num_inputs+aiger_spec->num_latches)) {
+            permutation.push_back(freq_lit_vector[i].second/2);
+            all_var_indices.erase(freq_lit_vector[i].second/2);
+//                cout << "perm level " << i << " lit freq " << freq_lit_vector[i].first << " setting var(lit/2) " << freq_lit_vector[i].second/2 << endl;
+        }
+        else {
+            auto some_random_var = *all_var_indices.begin();                         L_INF("ALERT!!! who did create this var? " << some_random_var);
+            all_var_indices.erase(all_var_indices.begin());
+            permutation.push_back(some_random_var);
+        }
+    }
+    MASSERT(all_var_indices.empty(), "should be empty");
+
+    return permutation;
+}
 
 
 bool Synth::run() {
     L_INF("synthesize..");
-    vector<BDD> tmp;
 
-    if (calc_init_order) {
-        Grapher grapher(this->aiger_spec);                              timer.sec_restart();
-        grapher.compute_deps();                                         L_INF("calculating deps graph took (sec): " << timer.sec_restart());
+    Grapher grapher(this->aiger_spec);                              timer.sec_restart();
+    grapher.compute_deps();                                         L_INF("calculating deps graph took (sec): " << timer.sec_restart());
+//                                               grapher.dump_dot();
+//                                               cudd.EnableReorderingReporting();
 
-        /*
-        L_INF("frequencies of latches");
-        for (unsigned i = 0; i < aiger_spec->num_latches; ++i) {
-            auto lit = aiger_spec->latches[i].lit;
-            cout << "latch lit " << lit << " : " << grapher.freq_map[lit] << endl;
-        }
-        L_INF("frequencies of inputs");
-        for (unsigned i = 0; i < aiger_spec->num_inputs; ++i) {
-            auto lit = aiger_spec->inputs[i].lit;
-            cout << "input lit " << lit << " : " << grapher.freq_map[lit] << endl;
-        }
-         */
+    // Create all variables. _tmp ensures that BDD have positive refs.
+    vector<BDD> _tmp;
+    for (unsigned i=0; i < aiger_spec->num_inputs+aiger_spec->num_latches+1; ++i)
+        _tmp.push_back(cudd.bddVar(i));
 
-        vector<pair<unsigned, unsigned> > freq_lit_vector;
-        for (unsigned i = 0; i < aiger_spec->num_inputs; ++i) {
-            auto lit = aiger_spec->inputs[i].lit;
-            freq_lit_vector.push_back(make_pair(grapher.freq_map[lit], lit));
-        }
-        for (unsigned i = 0; i < aiger_spec->num_latches; ++i) {
-            auto lit = aiger_spec->latches[i].lit;
-            freq_lit_vector.push_back(make_pair(grapher.freq_map[lit], lit));
-        }
+//    Cudd_MakeTreeNode(cudd.getManager(), 35, 5, MTR_DEFAULT);
 
-        sort(freq_lit_vector.begin(), freq_lit_vector.end(), first_cmp);
+//    vector<int> permutation = compute_permutation(grapher, cudd, aiger_spec);
+//    MASSERT(permutation.size() == (unsigned) cudd.ReadSize(), "");
 
-        // now we need to create BDD variables and specify their order:
-        for (unsigned i = 0; i < aiger_spec->num_inputs; ++i)
-            tmp.push_back(cudd.bddVar(aiger_spec->inputs[i].lit/2));
-        for (unsigned i = 0; i < aiger_spec->num_latches; ++i)
-            tmp.push_back(cudd.bddVar(aiger_spec->latches[i].lit/2));
-
-        MASSERT(((unsigned)cudd.ReadSize()) >= aiger_spec->num_inputs + aiger_spec->num_latches, "should not happen: " << cudd.ReadSize() << " vs " << (aiger_spec->num_latches+aiger_spec->num_inputs));
-
-                                                                                        L_INF("cudd.ReadSize() = " << cudd.ReadSize() << " vs nof inputs/latches = " <<  aiger_spec->num_inputs + aiger_spec->num_latches);
-
-        unordered_set<unsigned> all_var_indices;
-        for (unsigned i = 0; i < (unsigned)cudd.ReadSize(); ++i)
-            all_var_indices.insert(i);
-
-        int permutation[cudd.ReadSize()];
-        for (unsigned i = 0; i < (unsigned)cudd.ReadSize(); ++i) {
-            if (i < (aiger_spec->num_inputs+aiger_spec->num_latches)) {
-                permutation[i] = freq_lit_vector[i].second/2;
-                all_var_indices.erase(freq_lit_vector[i].second/2);
-//                cout << "perm level " << i << " lit freq " << freq_lit_vector[i].first << " setting var(lit/2) " << freq_lit_vector[i].second/2 << endl;
-            }
-            else {
-                auto some_random_var = *all_var_indices.begin();                         L_INF("ALERT!!! who did create this var? " << some_random_var);
-                all_var_indices.erase(all_var_indices.begin());
-                tmp.push_back(cudd.bddVar(some_random_var));  //just in case, create the var first
-                permutation[i] = some_random_var;
-            }
-        }
-        MASSERT(all_var_indices.empty(), "should be empty");
-        cudd.ShuffleHeap(permutation);
+    /*
+    L_INF("frequencies of latches");
+    for (unsigned i = 0; i < aiger_spec->num_latches; ++i) {
+        auto lit = aiger_spec->latches[i].lit;
+        cout << "latch lit " << lit << " : " << grapher.freq_map[lit] << endl;
     }
+    L_INF("frequencies of inputs");
+    for (unsigned i = 0; i < aiger_spec->num_inputs; ++i) {
+        auto lit = aiger_spec->inputs[i].lit;
+        cout << "input lit " << lit << " : " << grapher.freq_map[lit] << endl;
+    }
+    */
 
-                                                                L_INF("init_order: " << cudd.OrderString());
-                                                                timer.sec_restart();
-    introduce_error_bdd();                                      L_INF("introduce_error_bdd took (sec): " << timer.sec_restart());
+//    cudd.ShuffleHeap(permutation.data());
 
     /*
     vector<BDD> nodes;
@@ -606,47 +620,32 @@ bool Synth::run() {
     cudd.DumpDot(nodes, names_.data(), NULL);
     cout << cudd.OrderString() << endl;
     exit(0);
-     */
-
+    */
+                                                                timer.sec_restart();
+    introduce_error_bdd();                                      L_INF("introduce_error_bdd took (sec): " << timer.sec_restart());
     compose_init_state_bdd();
     compose_transition_vector();                                L_INF("calc_trans_rel took (sec): " << timer.sec_restart());
-                                                                L_INF("order_after_trans_rel: " << cudd.OrderString());
 
-    /*
-    int count = 0;                                              L_INF("REORDERING: ORIGINAL: SIZE: " << cudd.ReadNodeCount());
-    while (count != cudd.ReadNodeCount()) {
-        count = (int) cudd.ReadNodeCount();
-        cudd.ReduceHeap(CUDD_REORDER_SIFT_CONVERGE, 0);                     L_INF("REORDERING: SIFT_CONV: SIZE: " << cudd.ReadNodeCount());
-        cudd.ReduceHeap(CUDD_REORDER_LINEAR_CONVERGE, 0);                   L_INF("REORDERING: LIN_CONV: SIZE: " << cudd.ReadNodeCount());
-    }                                                                       L_INF("first reordering while took (sec): " << timer.sec_restart());
+//                                               reorder_opt(cudd);
+//                                               print_aiger_like_order(cudd);
 
-    // now add annealing
-    count = 0;
-    while (count != cudd.ReadNodeCount()) {
-        count = (int) cudd.ReadNodeCount();
-        cudd.ReduceHeap(CUDD_REORDER_ANNEALING, 0);                           L_INF("REORDERING: ANNLNG: SIZE: " << cudd.ReadNodeCount());
-        cudd.ReduceHeap(CUDD_REORDER_SIFT_CONVERGE, 0);                       L_INF("REORDERING: SIFT_CONV: SIZE: " << cudd.ReadNodeCount());
-        cudd.ReduceHeap(CUDD_REORDER_LINEAR_CONVERGE, 0);                     L_INF("REORDERING: LIN_CONV: SIZE: " << cudd.ReadNodeCount());
-    }                                                                         L_INF("second reordering while took (sec): " << timer.sec_restart());
-
-    L_INF("calc_win_region took (sec): 1");                    // TODO: remove me (this is ugly hack to avoid table modifications!)
-    L_INF("order_after_win_region: " << cudd.OrderString());   // TODO: remove me (this is ugly hack to avoid table modifications!)
-
-    print_order_frequencies(grapher, cudd, aiger_spec);
-
-    L_INF("VARIABLE ORDER");
-    L_INF(cudd.OrderString());
-     */
                                                                 timer.sec_restart();
     BDD win_region = calc_win_region();                         L_INF("calc_win_region took (sec): " << timer.sec_restart());
-                                                                L_INF("order_after_win_region: " << cudd.OrderString());
+
+//                                               print_aiger_like_order(cudd);
+//                                               Cudd_MakeTreeNode(cudd.getManager(), 5, 8, MTR_FIXED);
+
+//                                               reorder_opt(cudd);
+//                                               cout << "optimal order after calc_win_region" << endl;
+//                                               print_aiger_like_order(cudd);
+//                                                 cout << cudd.ReadNodeCount() << endl;
 
     if (win_region.IsZero())
         return 0;
 
     BDD non_det_strategy = get_nondet_strategy(win_region);
 
-    // win_region = cudd.bddZero();  // TODO: kill refs to non-needed BDDs
+    win_region = cudd.bddZero();     // TODO: does not seem to help (also need to kill error/latches) -- transfer to new manager instead?
 
     vector<BDD> models = extract_output_funcs(non_det_strategy);   L_INF("extract_output_funcs took (sec): " << timer.sec_restart());
                                                                    L_INF("order_after_circuit_extraction: " << cudd.OrderString());

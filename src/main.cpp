@@ -39,7 +39,7 @@ int main (int argc, char *argv[]) {
     spdlog::set_pattern("%H:%M:%S %v ");
     // end of logger setup
 
-    Synth synthesizer(input_file_name, output_file_name, false);  //TODO: current: account for "" and "stdout"
+    Synth synthesizer(input_file_name, output_file_name, true);  //TODO: current: account for "" and "stdout"
     bool is_realizable = synthesizer.run();
 
     cout << (is_realizable ? "realizable":"unrealizable") << endl;

@@ -12,6 +12,7 @@
 
 extern "C" {
 #include <aiger.h>
+#include <mtr.h>
 #include <cudd.h>
 };
 
@@ -42,7 +43,7 @@ private:
     const string &output_file_name;
     bool calc_init_order;
 
-    tr1::unordered_map<unsigned , BDD> transition_rel;
+    tr1::unordered_map<unsigned, BDD> transition_rel;  // _aiger_unsigned_lit_ to bdd
     BDD init;
     BDD error;
 
