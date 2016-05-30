@@ -160,6 +160,10 @@ vector<BDD> Synth::get_uncontrollable_output_bdds() {
 
 
 void Synth::introduce_error_bdd() {
+    // TODO:
+    // if error does not depend on inputs/outputs,
+    // then unwind until it starts depending
+    // Hm: will it speed up or slow down?
     error = get_bdd_for_value(aiger_spec->outputs[0].lit);
 }
 
@@ -204,24 +208,54 @@ BDD Synth::pre_sys(BDD dst) {
     :return: BDD of the predecessor states
     **/
 
-    dst = dst.VectorCompose(get_substitution());
+    // We consider two cases wrt. error:
+    // 1. error = error(t,u,c)
+    // 2. error = error(t)  (does not depend on u,c)
+    // In the second case, we move error out of the quantification:
+    // !error(t) & ∀u ∃c (dst(t)[t <- bdd_next_t(t,u,c)]))
 
-    vector<BDD> controllable = get_controllable_vars_bdds();
+    bool error_depends_on_inputs = false;   // TODO: remove: does not seem to affect
 
-    MASSERT(!controllable.empty(), "");
-
-    // ∃c ~error & dst[new_t]
-    BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
-    BDD result = dst.AndAbstract(~error, vars_cube);
-
-    vector<BDD> uncontrollable = get_uncontrollable_output_bdds();
-    if (!uncontrollable.empty()) {
-        // ∀u ∃c ~error & dst[new_t]
-        BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
-        result = result.UnivAbstract(uncontrollable_cube);
+    auto support = error.SupportIndices();
+    unordered_set<unsigned> support_set(support.begin(), support.end());
+    for (unsigned i = 0; i < aiger_spec->num_inputs; ++i) {
+        auto idx = aiger_spec->inputs[i].lit/2;
+        if (support_set.find(idx) != support_set.end()) {
+            error_depends_on_inputs = true;
+            break;
+        }
     }
 
-    return result;
+    dst = dst.VectorCompose(get_substitution());
+
+    if (error_depends_on_inputs) {
+        BDD result;
+        vector<BDD> controllable = get_controllable_vars_bdds();
+        BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
+        result = dst.AndAbstract(~error, vars_cube);
+        vector<BDD> uncontrollable = get_uncontrollable_output_bdds();
+        if (!uncontrollable.empty()) {
+            // ∀u ∃c (...)
+            BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
+            result = result.UnivAbstract(uncontrollable_cube);
+        }
+        return result;   // ∀u ∃c: (!error(t,u,c)  &  (dst(t)[t <- bdd_next_t(t,u,c)]))
+
+    }
+    else {
+        BDD result;
+        vector<BDD> controllable = get_controllable_vars_bdds();
+        BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
+
+        result = dst.ExistAbstract(vars_cube);
+        vector<BDD> uncontrollable = get_uncontrollable_output_bdds();
+        if (!uncontrollable.empty()) {
+            // ∀u ∃c (...)
+            BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
+            result = result.UnivAbstract(uncontrollable_cube);
+        }
+        return result & ~error;  // !error & ∀u ∃c: dst(t)[t <- bdd_next_t(t,u,c)]
+    }
 }
 
 vector<BDD> Synth::get_substitution() {
@@ -622,9 +656,9 @@ bool Synth::run() {
     exit(0);
     */
                                                                 timer.sec_restart();
-    introduce_error_bdd();                                      L_INF("introduce_error_bdd took (sec): " << timer.sec_restart());
     compose_init_state_bdd();
     compose_transition_vector();                                L_INF("calc_trans_rel took (sec): " << timer.sec_restart());
+    introduce_error_bdd();                                      L_INF("introduce_error_bdd took (sec): " << timer.sec_restart());
 
 //                                               reorder_opt(cudd);
 //                                               print_aiger_like_order(cudd);
@@ -673,6 +707,7 @@ Synth::Synth(const string &aiger_file_name,
              bool calc_init_order) : output_file_name(output_file_name),
                                      calc_init_order(calc_init_order) {
 
+    cudd.Srandom(827464282);  // not sure: for reproducibility
     cudd.AutodynEnable(CUDD_REORDER_SIFT);
 
     aiger_spec = aiger_init();
