@@ -24,11 +24,16 @@ extern "C" {
 using namespace std;
 
 
+class Grapher;
+
+
 class Synth {
 
 public:
-    Synth(const string &aiger_file_name, const string &output_file_name, bool calc_init_order);
-    bool run(); // -> returns 'is realizable'
+    Synth() {}
+    // NOTE: time_limit_sec is used for heuristics (I won't stop on reaching it)
+    bool run(const string &aiger_file_name, const string &output_file_name, unsigned time_limit_sec=3600);  // -> returns 'is realizable'
+    ~Synth();
 
 
 private:
@@ -38,18 +43,15 @@ private:
 
 private:
     Timer timer;
+    unsigned time_limit_sec;
     Cudd cudd;
     aiger *aiger_spec;
-    const string &output_file_name;
-    bool calc_init_order;
 
     tr1::unordered_map<unsigned, BDD> transition_rel;  // _aiger_unsigned_lit_ to bdd
     BDD init;
     BDD error;
 
-
-public:
-    ~Synth();
+    Grapher* grapher;   //pointer: let's keep class def secret from the compiler
 
 
 private:

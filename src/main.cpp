@@ -35,12 +35,12 @@ int main (int argc, char *argv[]) {
     }
 
     // setup logging
-    auto console = spdlog::stdout_logger_mt("console", false);
+    auto console = spdlog::stdout_logger_mt("console", true);
     spdlog::set_pattern("%H:%M:%S %v ");
     // end of logger setup
 
-    Synth synthesizer(input_file_name, output_file_name, true);  //TODO: current: account for "" and "stdout"
-    bool is_realizable = synthesizer.run();
+    Synth synthesizer;  //TODO: current: account for "" and "stdout"
+    bool is_realizable = synthesizer.run(input_file_name, output_file_name);
 
     cout << (is_realizable ? "realizable":"unrealizable") << endl;
     return is_realizable? 10:20;

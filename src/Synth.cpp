@@ -1,9 +1,10 @@
 #include <iostream>
 #include <unordered_map>
 #include <unordered_set>
-#include <spdlog/spdlog.h>
 #include <sstream>
 #include <vector>
+#include <algorithm>
+#include <spdlog/spdlog.h>
 
 #include "Synth.hpp"
 
@@ -18,22 +19,19 @@
 
 class Grapher {
 public:
-    Grapher(aiger* spec) {
-        this->spec = spec;
-    }
+    Grapher() {}
 
-    aiger* spec;
-    unordered_map<unsigned, unordered_set<unsigned> > deps;
+    unordered_map<unsigned, unordered_set<unsigned> > deps;  // aiger_unsigned_lit -> set of aiger_unsigned_lit // for latches -- use latch.next
     unordered_map<unsigned, unsigned> freq_map;
 
     unordered_set<unsigned>
-    get_deps(unsigned lit, aiger* spec) {
+    _get_deps(unsigned lit, aiger *spec) {
         auto stripped_lit = STRIP_LIT(lit);
 
         if (deps.find(stripped_lit) == deps.end()) {
             auto and_ = aiger_is_and(spec, stripped_lit);                       MASSERT(and_, "impossible");
-            auto rhs0_deps = get_deps(and_->rhs0, spec);
-            auto rhs1_deps = get_deps(and_->rhs1, spec);
+            auto rhs0_deps = _get_deps(and_->rhs0, spec);
+            auto rhs1_deps = _get_deps(and_->rhs1, spec);
 
             unordered_set<unsigned> a_deps;
             a_deps.insert(rhs0_deps.begin(), rhs0_deps.end());
@@ -45,7 +43,10 @@ public:
         return deps[stripped_lit];
     }
 
-    void compute_deps() {
+    void compute_deps(aiger* spec) {
+        deps.clear();
+        freq_map.clear();
+
         deps[0] = unordered_set<unsigned>();  // value 'false' (need to insert this value, since we later call 'find')
 
         for (unsigned i=0; i < spec->num_latches; ++i)
@@ -58,15 +59,15 @@ public:
         // now we calculate dependencies between them
 
         for (unsigned i=0; i < spec->num_ands; ++i)
-            deps[spec->ands[i].lhs] = get_deps(spec->ands[i].lhs, spec);
+            deps[spec->ands[i].lhs] = _get_deps(spec->ands[i].lhs, spec);
 
         // at this point deps of all 'real' vars are computed:
         // - input vars do not have deps,
         // - latches vars are computed because dependencies of their next literals are computed
-        compute_freq_map();
+        _compute_freq_map(spec);
     }
 
-    void compute_freq_map() {
+    void _compute_freq_map(aiger *spec) {
         for (unsigned i=0; i < spec->num_latches; ++i) {
             auto latch_deps = deps[STRIP_LIT(spec->latches[i].next)];
             for (auto const & elem : latch_deps)
@@ -84,7 +85,7 @@ public:
 //     TODO:
 //    void distance(unsigned lit1, unsigned lit2) { }
 //
-    void dump_dot() {
+    void dump_dot(aiger* spec) {
         cout << "digraph latch_graph { rankdir=BT;" << endl;
 
         for (unsigned i=0; i < spec->num_inputs; i++)
@@ -160,10 +161,6 @@ vector<BDD> Synth::get_uncontrollable_output_bdds() {
 
 
 void Synth::introduce_error_bdd() {
-    // TODO:
-    // if error does not depend on inputs/outputs,
-    // then unwind until it starts depending
-    // Hm: will it speed up or slow down?
     error = get_bdd_for_value(aiger_spec->outputs[0].lit);
 }
 
@@ -192,71 +189,6 @@ void Synth::compose_transition_vector() {
         transition_rel[aiger_spec->latches[i].lit] = get_bdd_for_value(aiger_spec->latches[i].next);
 }
 
-
-BDD Synth::pre_sys(BDD dst) {
-    /**
-    Calculate predecessor states of given states.
-
-        ∀u ∃c ∃t': tau(t,u,c,t') & dst(t') & ~error(t,u,c)
-
-    We use the direct substitution optimization (since t' <-> BDD(t,u,c)), thus:
-
-        ∀u ∃c: (!error(t,u,c)  &  (dst(t)[t <- bdd_next_t(t,u,c)]))
-
-    Note that we do not replace t variables in the error bdd.
-
-    :return: BDD of the predecessor states
-    **/
-
-    // We consider two cases wrt. error:
-    // 1. error = error(t,u,c)
-    // 2. error = error(t)  (does not depend on u,c)
-    // In the second case, we move error out of the quantification:
-    // !error(t) & ∀u ∃c (dst(t)[t <- bdd_next_t(t,u,c)]))
-
-    bool error_depends_on_inputs = false;   // TODO: remove: does not seem to affect
-
-    auto support = error.SupportIndices();
-    unordered_set<unsigned> support_set(support.begin(), support.end());
-    for (unsigned i = 0; i < aiger_spec->num_inputs; ++i) {
-        auto idx = aiger_spec->inputs[i].lit/2;
-        if (support_set.find(idx) != support_set.end()) {
-            error_depends_on_inputs = true;
-            break;
-        }
-    }
-
-    dst = dst.VectorCompose(get_substitution());
-
-    if (error_depends_on_inputs) {
-        BDD result;
-        vector<BDD> controllable = get_controllable_vars_bdds();
-        BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
-        result = dst.AndAbstract(~error, vars_cube);
-        vector<BDD> uncontrollable = get_uncontrollable_output_bdds();
-        if (!uncontrollable.empty()) {
-            // ∀u ∃c (...)
-            BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
-            result = result.UnivAbstract(uncontrollable_cube);
-        }
-        return result;   // ∀u ∃c: (!error(t,u,c)  &  (dst(t)[t <- bdd_next_t(t,u,c)]))
-
-    }
-    else {
-        BDD result;
-        vector<BDD> controllable = get_controllable_vars_bdds();
-        BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
-
-        result = dst.ExistAbstract(vars_cube);
-        vector<BDD> uncontrollable = get_uncontrollable_output_bdds();
-        if (!uncontrollable.empty()) {
-            // ∀u ∃c (...)
-            BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
-            result = result.UnivAbstract(uncontrollable_cube);
-        }
-        return result & ~error;  // !error & ∀u ∃c: dst(t)[t <- bdd_next_t(t,u,c)]
-    }
-}
 
 vector<BDD> Synth::get_substitution() {
     vector<BDD> substitution;
@@ -315,13 +247,287 @@ void reorder_opt(Cudd& cudd) {                                              L_IN
 }
 
 
+vector<unsigned> get_order(Cudd &cudd) {
+    string order_str = cudd.OrderString();
+    auto str_vars = split(order_str, ' ');                                MASSERT(str_vars.size() == (unsigned) cudd.ReadSize(), "");
+    vector<unsigned> order;
+    for (auto const & str_v : str_vars) {
+        order.push_back((unsigned) stoi(str_v.substr(1)));
+    }
+    return order;
+}
+
+
+string string_vector(const vector<unsigned>& v) {
+    stringstream ss;
+    for(size_t i = 0; i < v.size(); ++i)
+    {
+        if(i != 0)
+            ss << ",";
+        ss << v[i];
+    }
+    return ss.str();
+}
+
+string string_set(const unordered_set<unsigned>& v) {
+    stringstream ss;
+    for(auto const el : v)
+        ss << el << ",";
+    return ss.str();
+}
+
+
+template<typename Container>
+struct container_hash {
+    std::size_t operator()(Container const & v) const {
+        size_t hash = 0;
+        for (auto const el: v)
+            hash ^= el;
+        return hash;
+    }
+};
+
+
+bool do_intersect(const unordered_set<unsigned>& s1, const unordered_set<unsigned>& s2) {
+    for (auto el1 : s1)
+        if (s2.find(el1) != s2.end())
+            return true;
+    return false;
+}
+
+unordered_set<unsigned> merge_sets(const unordered_set<unsigned>& s1, const unordered_set<unsigned>& s2) {
+    unordered_set<unsigned> merged(s1.begin(), s1.end());
+    merged.insert(s2.begin(), s2.end());
+    return merged;
+}
+
+
+vector<unordered_set<unsigned> >
+get_group_candidates(const vector<vector<unsigned> >& orders,
+                     unsigned cur_iteration,
+                     unsigned window_size)
+{
+    unordered_map<unordered_set<unsigned>, unsigned, container_hash<unordered_set<unsigned> > >
+            group_freq;
+
+    for (auto const & order : orders) {
+        for (unsigned idx=0; idx < order.size() - window_size; ++idx) {
+            unordered_set<unsigned> sub_group(order.begin() + idx,
+                                              order.begin() + idx + window_size);
+            ++group_freq[sub_group];
+        }
+    }
+
+    vector<unordered_set<unsigned> > candidates;
+    for (auto const & it: group_freq) {
+        if (((float)it.second/cur_iteration) >= 0.8)  // 'very often'
+            candidates.push_back(it.first);
+    }
+    return candidates;
+}
+
+vector<unordered_set<unsigned> >
+merge_one_level(vector<unordered_set<unsigned> > candidates)
+{
+    vector<unordered_set<unsigned> > merged_candidates;
+    while (!candidates.empty()) {
+        auto c1 = candidates.back();
+        candidates.pop_back();
+        bool merged = false;
+        for (vector<unordered_set<unsigned> >::iterator it = candidates.begin(); it != candidates.end(); ++it) {
+            auto c2 = *it;
+            if (do_intersect(c1, c2)) {
+                merged_candidates.push_back(merge_sets(c1, c2));
+                candidates.erase(it);
+                merged = true;
+                break;
+            }
+        }
+        if (!merged)
+            merged_candidates.push_back(c1);
+    }
+    return merged_candidates;
+}
+
+
+void remove_intersecting(unordered_set<unsigned int> group,
+                         vector<unordered_set<unsigned int> > &groups)
+{
+    vector<unordered_set<unsigned int> >::iterator it = groups.begin();
+    while (it != groups.end()) {
+        if (do_intersect(group, *it))
+            it = groups.erase(it);
+        else
+            ++it;
+    }
+}
+
+
+unsigned get_var_of_min_order_position(Cudd& cudd, const unordered_set<unsigned>& group)
+{
+    unsigned min_var = *group.begin();
+    unsigned min_pos = (unsigned)cudd.ReadPerm(min_var);
+    for (auto const var : group)
+        if ((unsigned )cudd.ReadPerm(var) < min_pos) {
+            min_var = var;
+            min_pos = (unsigned)cudd.ReadPerm(var);
+        }
+    return min_var;
+}
+
+
+void introduce_group_into_cudd(Cudd &cudd, const unordered_set<unsigned>& group)
+{
+    L_INF("adding variable group to cudd: " << string_set(group));
+    auto first_var_pos = get_var_of_min_order_position(cudd, group);
+    Cudd_MakeTreeNode(cudd.getManager(), first_var_pos, (unsigned) group.size(), MTR_FIXED);
+}
+
+
+void _do_grouping(Cudd &cudd,
+                  unordered_map<unsigned, vector<unordered_set<unsigned> > > &groups_by_length,  // we modify its values
+                  unsigned cur_group_length,
+                  const vector<unsigned>& cur_order)
+{
+    L_INF("fixing groups of size " << cur_group_length << ". The number of groups = " << groups_by_length[cur_group_length].size());
+
+    auto cur_groups = groups_by_length[cur_group_length];
+
+    for (unsigned i = 0; i+cur_group_length < cur_order.size(); ++i) {
+        unordered_set<unsigned> candidate;
+        for (unsigned j = 0; j < cur_group_length; ++j)
+            candidate.insert(cur_order[i+j]);
+
+        if (find(cur_groups.begin(), cur_groups.end(), candidate) != cur_groups.end()) {
+            for (unsigned l = 2; l < cur_group_length; ++l) {
+//                cout << "rm intersections " << string_set(candidate) << endl;
+//                cout << "before: " << endl;
+//                for (auto const v : groups_by_length[l])
+//                    cout << string_set(v) << endl;
+                remove_intersecting(candidate, groups_by_length[l]);  //remove from smaller groups
+//                cout << "after: " << endl;
+//                for (auto const v : groups_by_length[l])
+//                    cout << string_set(v) << endl;
+            }
+            introduce_group_into_cudd(cudd, candidate);
+        }
+    }
+}
+
+
+void do_grouping(Cudd& cudd,
+                 const vector<vector<unsigned> >& orders,
+                 unsigned cur_iteration)
+{
+    L_INF("trying to group vars..");
+
+    if (orders[0].size() < 5)  // window size is too big
+        return;
+
+    unordered_map<unsigned, vector<unordered_set<unsigned> > > groups_by_length;
+    groups_by_length[2] = get_group_candidates(orders, cur_iteration, 2);
+    groups_by_length[3] = get_group_candidates(orders, cur_iteration, 3);
+    groups_by_length[4] = get_group_candidates(orders, cur_iteration, 4);
+    groups_by_length[5] = get_group_candidates(orders, cur_iteration, 5);
+
+    L_INF("# of group candidates: of size 2 -- " << groups_by_length[2].size());
+    for (auto const& g : groups_by_length[2]) {
+        cout << string_set(g) << endl;
+    }
+    cout << endl;
+    L_INF("# of group candidates: of size 3 -- " << groups_by_length[3].size());
+    for (auto const& g : groups_by_length[3]) {
+        cout << string_set(g) << endl;
+    }
+    cout << endl;
+    L_INF("# of group candidates: of size 4 -- " << groups_by_length[4].size());
+    L_INF("# of group candidates: of size 5 -- " << groups_by_length[5].size());
+
+    auto cur_order = orders.back();    // we fix only groups present only in the current order (because that is easier to implement)
+
+    for (unsigned i = 5; i>=2; --i)  // decreasing order!
+        if (!groups_by_length[i].empty())
+            _do_grouping(cudd, groups_by_length, i, cur_order);
+}
+
+
+void update_order_if(Cudd& cudd, vector<vector<unsigned> >& orders)
+{
+    static unsigned last_nof_orderings = 0;
+
+    if (last_nof_orderings != cudd.ReadReorderings())
+        orders.push_back(get_order(cudd));
+
+    last_nof_orderings = cudd.ReadReorderings();
+}
+
+
+
+BDD Synth::pre_sys(BDD dst) {
+    /**
+    Calculate predecessor states of given states.
+
+        ∀u ∃c ∃t': tau(t,u,c,t') & dst(t') & ~error(t,u,c)
+
+    We use the direct substitution optimization (since t' <-> BDD(t,u,c)), thus:
+
+        ∀u ∃c: (!error(t,u,c)  &  (dst(t)[t <- bdd_next_t(t,u,c)]))
+
+    Note that we do not replace t variables in the error bdd.
+
+    :return: BDD of the predecessor states
+    **/
+
+    // NOTE: I tried considering two special cases: error(t,u,c) and error(t),
+    //       and move error(t) outside of quantification ∀u ∃c.
+    //       It slowed down..
+
+    static unsigned i = 0;
+    static vector<vector<unsigned> > orders;
+
+    ++i;
+
+//    if (i == 3)
+//        do_grouping(cudd, orders, i);
+
+//    if (timer.sec_from_origin() > time_limit_sec/4)  // at 0.25*time_limit we fix the order
+//        do_grouping(cudd, orders, i);
+
+    if (timer.sec_from_origin() > 100)  //TODO: remove me
+        do_grouping(cudd, orders, i);
+
+    dst = dst.VectorCompose(get_substitution());                            update_order_if(cudd, orders);
+
+    BDD result;
+    vector<BDD> controllable = get_controllable_vars_bdds();
+    BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
+    result = dst.AndAbstract(~error, vars_cube);                            update_order_if(cudd, orders);
+    vector<BDD> uncontrollable = get_uncontrollable_output_bdds();
+    if (!uncontrollable.empty()) {
+        // ∀u ∃c (...)
+        BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
+        result = result.UnivAbstract(uncontrollable_cube);                  update_order_if(cudd, orders);
+    }
+    return result;
+}
+
+
+//int post_order_hook(DdManager* cudd, const char*, void*)
+//{
+//    L_INF("cudd initiated reordering: ");
+//    return 1;
+//}
+
+
 BDD Synth::calc_win_region() {
     /** Calculate a winning region for the safety game: win = greatest_fix_point.X [not_error & pre_sys(X)]
         :return: BDD representing the winning region
     **/
 
+//    cudd.AddHook(post_order_hook, CUDD_POST_REORDERING_HOOK);
+
     BDD new_ = cudd.bddOne();
-    for (unsigned i = 1; ; ++i) {                                             L_INF("calc_win_region: iteration " << i << "..");
+    for (unsigned i = 1; ; ++i) {                                             L_INF("calc_win_region: iteration " << i << ": node count " << cudd.ReadNodeCount());
         BDD curr = new_;
 
         new_ = pre_sys(curr);
@@ -331,8 +537,6 @@ BDD Synth::calc_win_region() {
 
         if (new_ == curr)
             return new_;
-
-        //TODO: after the first/second iteration do expensive reordering? and build groups?
     }
 }
 
@@ -589,13 +793,45 @@ vector<int> compute_permutation(Grapher& grapher, Cudd& cudd, aiger* aiger_spec)
 }
 
 
-bool Synth::run() {
-    L_INF("synthesize..");
+void print_set(unordered_set<unsigned>& s, aiger* spec) {
+    for (auto const e: s) {
+        cout << e;
+        auto latch = aiger_is_latch(spec, e);
+        if (latch) {
+            cout << "(" << latch->next << ")";
+        }
+        cout << endl;
 
-    Grapher grapher(this->aiger_spec);                              timer.sec_restart();
-    grapher.compute_deps();                                         L_INF("calculating deps graph took (sec): " << timer.sec_restart());
-//                                               grapher.dump_dot();
-//                                               cudd.EnableReorderingReporting();
+    }
+    cout << endl;
+}
+
+class Cleaner {
+public:
+    aiger* spec;
+    Cleaner(aiger* spec): spec(spec) { }
+    ~Cleaner() { aiger_reset(spec); }
+};
+
+
+bool Synth::run(const string& aiger_file_name, const string& output_file_name, unsigned time_limit_sec_) {
+    time_limit_sec = time_limit_sec_;
+    cudd.Srandom(827464282);  // for reproducibility (?)
+    cudd.AutodynEnable(CUDD_REORDER_SIFT);
+    cudd.EnableReorderingReporting();
+
+    aiger_spec = aiger_init();
+    const char *err = aiger_open_and_read_from_file(aiger_spec, aiger_file_name.c_str());
+    MASSERT(err == NULL, err);
+    Cleaner cleaner(aiger_spec);
+
+    // main part
+                                                                    L_INF("synthesize.. number of vars = " << aiger_spec->num_inputs+aiger_spec->num_latches);
+    grapher = new Grapher();                                        timer.sec_restart();
+    grapher->compute_deps(aiger_spec);                              L_INF("calculating deps graph took (sec): " << timer.sec_restart());
+
+                                                                    //grapher.dump_dot();
+                                                                    //print_set(grapher.deps[STRIP_LIT(aiger_spec->outputs[0].lit)], aiger_spec);
 
     // Create all variables. _tmp ensures that BDD have positive refs.
     vector<BDD> _tmp;
@@ -619,8 +855,6 @@ bool Synth::run() {
         cout << "input lit " << lit << " : " << grapher.freq_map[lit] << endl;
     }
     */
-
-//    cudd.ShuffleHeap(permutation.data());
 
     /*
     vector<BDD> nodes;
@@ -701,21 +935,10 @@ bool Synth::run() {
     return 1;
 }
 
-
-Synth::Synth(const string &aiger_file_name,
-             const string &output_file_name,
-             bool calc_init_order) : output_file_name(output_file_name),
-                                     calc_init_order(calc_init_order) {
-
-    cudd.Srandom(827464282);  // not sure: for reproducibility
-    cudd.AutodynEnable(CUDD_REORDER_SIFT);
-
-    aiger_spec = aiger_init();
-    const char *err = aiger_open_and_read_from_file(aiger_spec, aiger_file_name.c_str());
-    MASSERT(err == NULL, err);
-}
-
-
 Synth::~Synth() {
-    aiger_reset(aiger_spec);
+    if (grapher)
+        delete(grapher);
+    grapher = NULL;
 }
+
+

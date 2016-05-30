@@ -12,7 +12,7 @@
 class Timer {
 public:
     Timer() {
-        last = std::clock();
+        last = origin = std::clock();
     }
 
     /* (restarts the counter)
@@ -24,8 +24,13 @@ public:
         return elapsed;
     }
 
+    clock_t sec_from_origin() const {
+        return (std::clock() - origin) / CLOCKS_PER_SEC;
+    }
+
 private:
     std::clock_t last;
+    std::clock_t origin;
 };
 
 
