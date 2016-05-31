@@ -361,7 +361,7 @@ void introduce_group_into_cudd(Cudd &cudd, const SetUint& group)
 {
     L_INF("adding variable group to cudd: " << string_set(group));
     auto first_var_pos = get_var_of_min_order_position(cudd, group);
-    Cudd_MakeTreeNode(cudd.getManager(), first_var_pos, (uint) group.size(), MTR_FIXED);
+    cudd.MakeTreeNode(first_var_pos, (uint) group.size(), MTR_FIXED);
 }
 
 
