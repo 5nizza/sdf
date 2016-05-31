@@ -50,6 +50,8 @@ private:
     tr1::unordered_map<unsigned, BDD> transition_rel;  // _aiger_unsigned_lit_ to bdd
     BDD init;
     BDD error;
+    BDD win_region;
+    BDD non_det_strategy;
 
     Grapher* grapher;   //pointer: let's keep class def secret from the compiler
 
@@ -58,7 +60,7 @@ private:
     BDD get_bdd_for_value(unsigned lit);
 
     vector<BDD> get_controllable_vars_bdds();
-    vector<BDD> get_uncontrollable_output_bdds();
+    vector<BDD> get_uncontrollable_vars_bdds();
 
     vector<BDD> get_bdd_vars(bool(*filter_func)(char *));
 
@@ -74,9 +76,9 @@ private:
 
     BDD calc_win_region();
 
-    BDD get_nondet_strategy(BDD win_region);
+    BDD get_nondet_strategy();
 
-    vector<BDD> extract_output_funcs(BDD nondet_strategy);
+    vector<BDD> extract_output_funcs();
 
     unsigned next_lit();
 

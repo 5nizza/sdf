@@ -160,7 +160,7 @@ vector<BDD> Synth::get_controllable_vars_bdds() {
 }
 
 
-vector<BDD> Synth::get_uncontrollable_output_bdds() {
+vector<BDD> Synth::get_uncontrollable_vars_bdds() {
     return get_bdd_vars(not_starts_with_controllable);
 }
 
@@ -473,7 +473,7 @@ BDD Synth::pre_sys(BDD dst) {
     vector<BDD> controllable = get_controllable_vars_bdds();
     BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
     result = dst.AndAbstract(~error, vars_cube);                                update_order_if(cudd, orders);
-    vector<BDD> uncontrollable = get_uncontrollable_output_bdds();
+    vector<BDD> uncontrollable = get_uncontrollable_vars_bdds();
     if (!uncontrollable.empty()) {
         // ∀u ∃c (...)
         BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
@@ -512,7 +512,7 @@ BDD Synth::calc_win_region() {
 }
 
 
-BDD Synth::get_nondet_strategy(BDD win_region) {
+BDD Synth::get_nondet_strategy() {
     /**
     Get non-deterministic strategy from the winning region.
     If the system outputs controllable values that satisfy this non-deterministic strategy,
@@ -532,19 +532,29 @@ BDD Synth::get_nondet_strategy(BDD win_region) {
 
     L_INF("get_nondet_strategy..");
 
+    // TODO: do we need win_region?
     return ~error & win_region & win_region.VectorCompose(get_substitution());
 }
 
 
 
-vector<BDD> Synth::extract_output_funcs(BDD nondet_strategy) {
+vector<BDD> Synth::extract_output_funcs() {
+    // TODO:
+    // 1. does the order matter? try more often referenced first? or largest first (nodeCount)?
+    //
+
+
     /** The result vector respects the order of the controllable variables **/
 
     L_INF("extract_output_funcs..");
 
+    // TODO: sure?
+    cudd.FreeTree();    // ordering that worked for win region computation might not work here
+
     vector<BDD> models;
 
     vector<BDD> controls = get_controllable_vars_bdds();
+
     for (uint i = 0; i < controls.size(); ++i) {
         aiger_symbol *aiger_input = aiger_is_input(aiger_spec, STRIP_LIT(controls[i].NodeReadIndex()*2));
         L_INF("getting output function for " << aiger_input->name);
@@ -556,10 +566,10 @@ vector<BDD> Synth::extract_output_funcs(BDD nondet_strategy) {
         BDD c_arena;
         if (controls.size() >= 2) {
             BDD cube = cudd.bddComputeCube(&controls[1], NULL, (int) (controls.size() - 1));
-            c_arena = nondet_strategy.ExistAbstract(cube);
+            c_arena = non_det_strategy.ExistAbstract(cube);
         }
         else { //special case of a single control
-            c_arena = nondet_strategy;
+            c_arena = non_det_strategy;
         }
         // Now we have: c_arena(t,u,c) = ∃c_others: nondet(t,u,c)
         // (i.e., c_arena talks about this particular c, about t and u)
@@ -575,24 +585,33 @@ vector<BDD> Synth::extract_output_funcs(BDD nondet_strategy) {
 
         // TODO: deref BDDs?
 
+        auto support_indices = cudd.SupportIndices(vector<BDD>({c_must_be_false, c_must_be_true}));
+        for (auto const var_cudd_idx : support_indices) {
+            auto v = cudd.ReadVars(var_cudd_idx);
+            auto new_c_must_be_false = c_must_be_false.ExistAbstract(v);
+            auto new_c_must_be_true = c_must_be_true.ExistAbstract(v);
+            if ((new_c_must_be_false & new_c_must_be_true) == cudd.bddZero()) {  // TODO: there was a more efficient cudd operation for this?
+                cout << "eliminate var!" << var_cudd_idx << endl;
+                c_must_be_false = new_c_must_be_false;
+                c_must_be_true = new_c_must_be_true;
+            }
+        }
+
+
         BDD c_care_set = c_must_be_true | c_must_be_false;
 
-        // We use 'restrict' operation, but we could also do just:
-        // c_model = care_set -> must_be_true
-        // ..but this is (probably) less efficient, since we cannot set c=1 if it is not in care_set, but we could.
+        // We use 'restrict' operation, but we could also just do:
+        //     c_model = care_set -> must_be_true
+        // but this is (presumably) less efficient (in time? in size?).
+        // (intuitively, because we always set c_model to 1 if !care_set, but we could set it to 0)
         //
-        // Restrict on the other side applies optimizations to find smaller bdd.
-        // It cannot be expressed using boolean logic operations since we would need to say:
-        // must_be_true = ite(care_set, must_be_true, "don't care")
-        // and "don't care" cannot be expressed in boolean logic.
-
-        // Restrict operation:
-        //   on care_set: must_be_true.restrict(care_set) <-> must_be_true
+        // The result of restrict operation satisfies:
+        //     on c_care_set: c_must_be_true <-> must_be_true.Restrict(c_care_set)
 
         BDD c_model = c_must_be_true.Restrict(c_care_set);
         models.push_back(c_model);
 
-        nondet_strategy = nondet_strategy & make_bdd_eq(c, c_model);   // TODO: call substitute instead
+        non_det_strategy = non_det_strategy.Compose(c_model, c.NodeReadIndex());
 
         // TODO: add optimization 'variables elimination'
     }
@@ -869,7 +888,7 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
 //                                               print_aiger_like_order(cudd);
 
                                                                 timer.sec_restart();
-    BDD win_region = calc_win_region();                         L_INF("calc_win_region took (sec): " << timer.sec_restart());
+    win_region = calc_win_region();                             L_INF("calc_win_region took (sec): " << timer.sec_restart());
 
 //                                               print_aiger_like_order(cudd);
 //                                               Cudd_MakeTreeNode(cudd.getManager(), 5, 8, MTR_FIXED);
@@ -882,12 +901,23 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
     if (win_region.IsZero())
         return 0;
 
-    BDD non_det_strategy = get_nondet_strategy(win_region);
+    non_det_strategy = get_nondet_strategy();
 
-    win_region = cudd.bddZero();     // TODO: does not seem to help (also need to kill error/latches) -- transfer to new manager instead?
+    //cleaning non-used bdds
+    win_region = cudd.bddZero();
+    transition_rel.clear();
+    init = cudd.bddZero();
+    error = cudd.bddZero();
+    //
 
-    vector<BDD> models = extract_output_funcs(non_det_strategy);   L_INF("extract_output_funcs took (sec): " << timer.sec_restart());
+    vector<BDD> models = extract_output_funcs();                   L_INF("extract_output_funcs took (sec): " << timer.sec_restart());
                                                                    L_INF("order_after_circuit_extraction: " << cudd.OrderString());
+
+    //cleaning non-used bdds
+    non_det_strategy = cudd.bddZero();
+    //
+
+//    cudd.ReduceHeap(CUDD_REORDER_SIFT_CONVERGE);    // TODO: only if have enough time
 
     vector<BDD> c_signals = get_controllable_vars_bdds();
     for (uint i = 0; i < models.size(); ++i)
