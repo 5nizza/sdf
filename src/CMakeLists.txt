@@ -22,12 +22,12 @@ add_library(${PROJECT}
 
 #target_link_libraries(${PROJECT} ${CUDD_LIBRARIES})
 
-set_target_properties(${PROJECT} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -fPIC -DNDEBUG -O3")
+#set_target_properties(${PROJECT} PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -fPIC -DNDEBUG -O3")
 
-add_executable(${PROJECT}-bin ${project_SRC} main)
-target_link_libraries(${PROJECT}-bin ${AIGER_LIBRARIES})
-target_link_libraries(${PROJECT}-bin ${CUDD_LIBRARIES})
-set_target_properties(${PROJECT}-bin PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -fPIC -DNDEBUG")
+add_executable(${PROJECT}-opt ${project_SRC} main)
+target_link_libraries(${PROJECT}-opt ${AIGER_LIBRARIES})
+target_link_libraries(${PROJECT}-opt ${CUDD_LIBRARIES})
+set_target_properties(${PROJECT}-opt PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -fPIC -DNDEBUG -O3")
 
 add_executable(${PROJECT}-debug ${project_SRC} main)
 target_link_libraries(${PROJECT}-debug ${AIGER_LIBRARIES})

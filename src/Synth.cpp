@@ -416,14 +416,13 @@ void do_grouping(Cudd& cudd,
 
     L_INF("# of group candidates: of size 2 -- " << groups_by_length[2].size());
     for (auto const& g : groups_by_length[2]) {
-        cout << string_set(g) << endl;
+        L_INF(string_set(g));
     }
     cout << endl;
     L_INF("# of group candidates: of size 3 -- " << groups_by_length[3].size());
     for (auto const& g : groups_by_length[3]) {
-        cout << string_set(g) << endl;
+        L_INF(string_set(g));
     }
-    cout << endl;
     L_INF("# of group candidates: of size 4 -- " << groups_by_length[4].size());
     L_INF("# of group candidates: of size 5 -- " << groups_by_length[5].size());
 
@@ -798,9 +797,9 @@ public:
 
 void init_cudd(Cudd& cudd)
 {
-    cudd.Srandom(827464282);  // for reproducibility (?)
+//    cudd.Srandom(827464282);  // for reproducibility (?)
     cudd.AutodynEnable(CUDD_REORDER_SIFT);
-    cudd.EnableReorderingReporting();
+//    cudd.EnableReorderingReporting();
 }
 
 
@@ -909,16 +908,16 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
     Cleaner cleaner(aiger_spec);
 
     // main part
-                                                                    L_INF("synthesize.. number of vars = " << aiger_spec->num_inputs+aiger_spec->num_latches);
+    L_INF("synthesize.. number of vars = " << aiger_spec->num_inputs + aiger_spec->num_latches);
 //    grapher = new Grapher();                                        timer.sec_restart();
 //    grapher->compute_deps(aiger_spec);                              L_INF("calculating deps graph took (sec): " << timer.sec_restart());
 
-                                                                    //grapher.dump_dot();
-                                                                    //print_set(grapher.deps[STRIP_LIT(aiger_spec->outputs[0].lit)], aiger_spec);
+    //grapher.dump_dot();
+    //print_set(grapher.deps[STRIP_LIT(aiger_spec->outputs[0].lit)], aiger_spec);
 
     // Create all variables. _tmp ensures that BDD have positive refs.
     vector<BDD> _tmp;
-    for (uint i=0; i < aiger_spec->num_inputs+aiger_spec->num_latches+1; ++i)
+    for (uint i = 0; i < aiger_spec->num_inputs + aiger_spec->num_latches + 1; ++i)
         _tmp.push_back(cudd.bddVar(i));
 
 //    vector<int> permutation = compute_permutation(grapher, cudd, aiger_spec);
@@ -971,9 +970,12 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
     exit(0);
     */
 
-    compose_init_state_bdd();                                   timer.sec_restart();
-    compose_transition_vector();                                L_INF("calc_trans_rel took (sec): " << timer.sec_restart());
-    introduce_error_bdd();                                      L_INF("introduce_error_bdd took (sec): " << timer.sec_restart());
+    compose_init_state_bdd();
+    timer.sec_restart();
+    compose_transition_vector();
+    L_INF("calc_trans_rel took (sec): " << timer.sec_restart());
+    introduce_error_bdd();
+    L_INF("introduce_error_bdd took (sec): " << timer.sec_restart());
 
 //    cout << "before comput: nof_vars = " << cudd.ReadSize() << endl;
 //    reachable = compute_reachable(aiger_spec, init, transition_func, error, cudd);
@@ -986,8 +988,9 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
 //                                               reorder_opt(cudd);
 //                                               print_aiger_like_order(cudd);
 
-                                                                timer.sec_restart();
-    win_region = calc_win_region();                             L_INF("calc_win_region took (sec): " << timer.sec_restart());
+    timer.sec_restart();
+    win_region = calc_win_region();
+    L_INF("calc_win_region took (sec): " << timer.sec_restart());
 
 //                                               print_aiger_like_order(cudd);
 //                                               Cudd_MakeTreeNode(cudd.getManager(), 5, 8, MTR_FIXED);
@@ -997,8 +1000,12 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
 //                                               print_aiger_like_order(cudd);
 //                                                 cout << cudd.ReadNodeCount() << endl;
 
-    if (win_region.IsZero())
+    if (win_region.IsZero()) {
+        cout << "UNREALIZABLE" << endl;
         return 0;
+    }
+
+    cout << "REALIZABLE" << endl;
 
     non_det_strategy = get_nondet_strategy();
 
@@ -1030,6 +1037,7 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
         model_to_aiger(cudd.ReadVars((int)it.first), it.second);
                                                                    L_INF("model_to_aiger took (sec): " << timer.sec_restart());
                                                                    L_INF("circuit size: " << (aiger_spec->num_ands + aiger_spec->num_latches));
+
     int res = 1;
     if (output_file_name == "stdout")
         res = aiger_write_to_file(aiger_spec, aiger_ascii_mode, stdout);
