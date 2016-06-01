@@ -1,5 +1,5 @@
 //
-// Created by ayrat on today.
+// Created by ayrat on yestoday.
 //
 
 #ifndef SDF_SYNTH_H
@@ -7,7 +7,7 @@
 
 
 #include <string>
-#include <tr1/unordered_map>
+#include <unordered_map>
 
 
 extern "C" {
@@ -24,7 +24,7 @@ extern "C" {
 using namespace std;
 
 
-class Grapher;
+//class Grapher;
 
 
 class Synth {
@@ -47,13 +47,15 @@ private:
     Cudd cudd;
     aiger *aiger_spec;
 
-    tr1::unordered_map<unsigned, BDD> transition_rel;  // _aiger_unsigned_lit_ to bdd
+    unordered_map<unsigned, BDD> transition_func;  // _aiger_unsigned_lit_ to bdd
     BDD init;
     BDD error;
     BDD win_region;
     BDD non_det_strategy;
 
-    Grapher* grapher;   //pointer: let's keep class def secret from the compiler
+    unordered_map<unsigned, BDD> bdd_by_aiger_unlit;   // this is specially for amba2match benchmarks
+
+//    Grapher* grapher;   //pointer: let's keep class def secret from the compiler
 
 
 private:
@@ -66,8 +68,6 @@ private:
 
     void introduce_error_bdd();
 
-    BDD make_bdd_eq(BDD first, BDD second);
-
     void compose_init_state_bdd();
 
     void compose_transition_vector();
@@ -78,7 +78,7 @@ private:
 
     BDD get_nondet_strategy();
 
-    vector<BDD> extract_output_funcs();
+    unordered_map<unsigned, BDD> extract_output_funcs();
 
     unsigned next_lit();
 
@@ -86,7 +86,7 @@ private:
 
     unsigned walk(DdNode *a_dd);
 
-    void model_to_aiger(BDD &c_signal, BDD &func);
+    void model_to_aiger(const BDD &c_signal, const BDD &func);
 
     vector<BDD> get_substitution();
 };

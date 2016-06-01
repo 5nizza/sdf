@@ -23,6 +23,7 @@ typedef vector<uint> VecUint;
 typedef unordered_set<uint> SetUint;
 
 
+/*
 class Grapher {
 public:
     Grapher() {}
@@ -110,11 +111,18 @@ public:
         cout << "}" << endl;
     }
 };
+ */
 
 
 
 BDD Synth::get_bdd_for_value(uint lit) {
     /* lit is an AIGER variable index with a 'sign' */
+
+    if (bdd_by_aiger_unlit.find(STRIP_LIT(lit)) != bdd_by_aiger_unlit.end()) {
+        BDD res = bdd_by_aiger_unlit[STRIP_LIT(lit)];
+        if (IS_NEGATED(lit))
+            return ~res;
+    }
 
     uint stripped_lit = STRIP_LIT(lit);
     BDD res;
@@ -131,6 +139,8 @@ BDD Synth::get_bdd_for_value(uint lit) {
         aiger_and *and_ = aiger_is_and(aiger_spec, stripped_lit);
         res = get_bdd_for_value(and_->rhs0) & get_bdd_for_value(and_->rhs1);
     }
+
+    bdd_by_aiger_unlit[stripped_lit] = res;
 
     return IS_NEGATED(lit) ? (~res):res;
 }
@@ -170,11 +180,6 @@ void Synth::introduce_error_bdd() {
 }
 
 
-BDD Synth::make_bdd_eq(BDD first, BDD second) {
-    return ~(first.Xor(second));
-}
-
-
 void Synth::compose_init_state_bdd() { // Initial state is 'all latches are zero'
     L_INF("compose_init_state_bdd..");
 
@@ -191,7 +196,7 @@ void Synth::compose_transition_vector() {
     L_INF("compose_transition_vector..");
 
     for (uint i = 0; i < aiger_spec->num_latches; ++i)
-        transition_rel[aiger_spec->latches[i].lit] = get_bdd_for_value(aiger_spec->latches[i].next);
+        transition_func[aiger_spec->latches[i].lit] = get_bdd_for_value(aiger_spec->latches[i].next);
 }
 
 
@@ -201,7 +206,7 @@ vector<BDD> Synth::get_substitution() {
     substitution.push_back(cudd.ReadVars(0));   // special variable
     for (uint i=1; i < (uint)cudd.ReadSize(); ++i) {
         if (aiger_is_latch(aiger_spec, i*2))
-            substitution.push_back(transition_rel.find(i*2)->second);
+            substitution.push_back(transition_func.find(i*2)->second);
         else
             substitution.push_back(cudd.ReadVars(i));
     }
@@ -225,7 +230,7 @@ vector<string> split(const string &s, char delim) {
     return elems;
 }
 
-
+/*
 void print_aiger_like_order(const Cudd& cudd) {
     string best_order = cudd.OrderString();
     auto str_vars = split(best_order, ' ');                                 MASSERT(str_vars.size() == (uint) cudd.ReadSize(), "");
@@ -233,8 +238,9 @@ void print_aiger_like_order(const Cudd& cudd) {
         cout << stoi(str_v.substr(1))*2 << " ";
     cout << endl;
 }
+ */
 
-
+/*
 void reorder_opt(Cudd& cudd) {                                              L_INF("reorder_opt, original size: " << cudd.ReadNodeCount());
     int count = 0;                                                          Timer timer;
     while (count != cudd.ReadNodeCount()) {
@@ -251,7 +257,7 @@ void reorder_opt(Cudd& cudd) {                                              L_IN
     }                                                                         L_INF("second reordering while took (sec): " << timer.sec_restart());
 }
 
-
+*/
 VecUint get_order(Cudd &cudd) {
     string order_str = cudd.OrderString();
     auto str_vars = split(order_str, ' ');                                MASSERT(str_vars.size() == (uint) cudd.ReadSize(), "");
@@ -261,7 +267,6 @@ VecUint get_order(Cudd &cudd) {
     }
     return order;
 }
-
 
 string string_vector(const VecUint& v) {
     stringstream ss;
@@ -280,7 +285,6 @@ string string_set(const SetUint& v) {
         ss << el << ",";
     return ss.str();
 }
-
 
 template<typename Container>
 struct container_hash {
@@ -423,7 +427,7 @@ void do_grouping(Cudd& cudd,
     L_INF("# of group candidates: of size 4 -- " << groups_by_length[4].size());
     L_INF("# of group candidates: of size 5 -- " << groups_by_length[5].size());
 
-    auto cur_order = orders.back();    // we fix only groups present only in the current order (because that is easier to implement)
+    auto cur_order = orders.back();    // we fix only groups present in the current order (because that is easier to implement)
 
     for (uint i = 5; i>=2; --i)  // decreasing order!
         if (!groups_by_length[i].empty())
@@ -461,18 +465,22 @@ BDD Synth::pre_sys(BDD dst) {
     // NOTE: I tried considering two special cases: error(t,u,c) and error(t),
     //       and move error(t) outside of quantification ∀u ∃c.
     //       It slowed down..
+    // TODO: try again: on the driver example
 
     static vector<VecUint> orders;
+    static bool did_grouping = false;
 
-    if (timer.sec_from_origin() > time_limit_sec/4)  // at 0.25*time_limit we fix the order
+    if (!did_grouping && timer.sec_from_origin() > time_limit_sec/4) { // at 0.25*time_limit we fix the order
         do_grouping(cudd, orders);
+        did_grouping = true;
+    }
 
     dst = dst.VectorCompose(get_substitution());                                update_order_if(cudd, orders);
 
-    BDD result;
     vector<BDD> controllable = get_controllable_vars_bdds();
     BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
-    result = dst.AndAbstract(~error, vars_cube);                                update_order_if(cudd, orders);
+    BDD result = dst.AndAbstract(~error, vars_cube);                            update_order_if(cudd, orders);
+
     vector<BDD> uncontrollable = get_uncontrollable_vars_bdds();
     if (!uncontrollable.empty()) {
         // ∀u ∃c (...)
@@ -495,15 +503,13 @@ BDD Synth::calc_win_region() {
         :return: BDD representing the winning region
     **/
 
-//    cudd.AddHook(post_order_hook, CUDD_POST_REORDERING_HOOK);
-
     BDD new_ = cudd.bddOne();
     for (uint i = 1; ; ++i) {                                             L_INF("calc_win_region: iteration " << i << ": node count " << cudd.ReadNodeCount());
         BDD curr = new_;
 
         new_ = pre_sys(curr);
 
-        if (!(init <= new_))  // checking containment
+        if ((init & new_) == cudd.bddZero())
             return cudd.bddZero();
 
         if (new_ == curr)
@@ -537,38 +543,30 @@ BDD Synth::get_nondet_strategy() {
 }
 
 
-
-vector<BDD> Synth::extract_output_funcs() {
-    // TODO:
-    // 1. does the order matter? try more often referenced first? or largest first (nodeCount)?
-    //
-
-
+hmap<uint,BDD> Synth::extract_output_funcs()
+{
     /** The result vector respects the order of the controllable variables **/
 
     L_INF("extract_output_funcs..");
 
-    // TODO: sure?
     cudd.FreeTree();    // ordering that worked for win region computation might not work here
 
-    vector<BDD> models;
+    hmap<unsigned,BDD> model_by_cuddidx;
 
     vector<BDD> controls = get_controllable_vars_bdds();
 
-    for (uint i = 0; i < controls.size(); ++i) {
-        aiger_symbol *aiger_input = aiger_is_input(aiger_spec, STRIP_LIT(controls[i].NodeReadIndex()*2));
+    while (!controls.empty()) {
+        BDD c = controls.back(); controls.pop_back();
+
+        aiger_symbol *aiger_input = aiger_is_input(aiger_spec, STRIP_LIT(c.NodeReadIndex()*2));
         L_INF("getting output function for " << aiger_input->name);
 
-        // the current control is [0], others = [1..]
-        swap(controls[0], controls[i]);
-        BDD c = controls[0];
-
         BDD c_arena;
-        if (controls.size() >= 2) {
-            BDD cube = cudd.bddComputeCube(&controls[1], NULL, (int) (controls.size() - 1));
+        if (controls.size() > 0) {
+            BDD cube = cudd.bddComputeCube(controls.data(), NULL, (int)controls.size());
             c_arena = non_det_strategy.ExistAbstract(cube);
         }
-        else { //special case of a single control
+        else { //no other signals left
             c_arena = non_det_strategy;
         }
         // Now we have: c_arena(t,u,c) = ∃c_others: nondet(t,u,c)
@@ -577,28 +575,22 @@ vector<BDD> Synth::extract_output_funcs() {
         BDD c_can_be_true = c_arena.Cofactor(c);
         BDD c_can_be_false = c_arena.Cofactor(~c);
 
-        // We need to intersect with can_be_true to narrow the search.
         BDD c_must_be_true = ~c_can_be_false & c_can_be_true;
         BDD c_must_be_false = c_can_be_false & ~c_can_be_true;
         // Note that we cannot use `c_must_be_true = ~c_can_be_false`,
         // since the negation can cause including tuples (t,i,o) that violate non_det_strategy.
-
-        // TODO: deref BDDs?
 
         auto support_indices = cudd.SupportIndices(vector<BDD>({c_must_be_false, c_must_be_true}));
         for (auto const var_cudd_idx : support_indices) {
             auto v = cudd.ReadVars(var_cudd_idx);
             auto new_c_must_be_false = c_must_be_false.ExistAbstract(v);
             auto new_c_must_be_true = c_must_be_true.ExistAbstract(v);
-            if ((new_c_must_be_false & new_c_must_be_true) == cudd.bddZero()) {  // TODO: there was a more efficient cudd operation for this?
-                cout << "eliminate var!" << var_cudd_idx << endl;
+
+            if ((new_c_must_be_false & new_c_must_be_true) == cudd.bddZero()) {
                 c_must_be_false = new_c_must_be_false;
                 c_must_be_true = new_c_must_be_true;
             }
         }
-
-
-        BDD c_care_set = c_must_be_true | c_must_be_false;
 
         // We use 'restrict' operation, but we could also just do:
         //     c_model = care_set -> must_be_true
@@ -608,17 +600,17 @@ vector<BDD> Synth::extract_output_funcs() {
         // The result of restrict operation satisfies:
         //     on c_care_set: c_must_be_true <-> must_be_true.Restrict(c_care_set)
 
-        BDD c_model = c_must_be_true.Restrict(c_care_set);
-        models.push_back(c_model);
+        BDD c_model = c_must_be_true.Restrict(c_must_be_true | c_must_be_false);
+
+        model_by_cuddidx[c.NodeReadIndex()] = c_model;
+
+        //killing node refs
+        c_must_be_false = c_must_be_true = c_can_be_false = c_can_be_true = c_arena = cudd.bddZero();
 
         non_det_strategy = non_det_strategy.Compose(c_model, c.NodeReadIndex());
-
-        // TODO: add optimization 'variables elimination'
     }
 
-    swap(controls[0], controls[controls.size() - 1]);
-
-    return models;
+    return model_by_cuddidx;
 }
 
 
@@ -707,7 +699,7 @@ uint Synth::walk(DdNode *a_dd) {
 
 
 /* Update aiger spec with a definition of `c_signal` */
-void Synth::model_to_aiger(BDD &c_signal, BDD &func) {
+void Synth::model_to_aiger(const BDD &c_signal, const BDD &func) {
     uint c_lit = c_signal.NodeReadIndex()*2;
 
     uint func_as_aiger_lit = walk(func.getNode());
@@ -718,7 +710,7 @@ void Synth::model_to_aiger(BDD &c_signal, BDD &func) {
 
 bool first_cmp (pair<uint, uint> a, pair<uint, uint> b) { return (a.first > b.first); /* > means often-first */ }
 
-
+/*
 void print_order_frequencies(Grapher& grapher, Cudd& cudd, aiger* aiger_spec) {
     string best_order = cudd.OrderString();
     auto str_vars = split(best_order, ' ');                             MASSERT(str_vars.size() == (uint) cudd.ReadSize(), "");
@@ -739,12 +731,11 @@ void print_order_frequencies(Grapher& grapher, Cudd& cudd, aiger* aiger_spec) {
     }
     cout << endl;
 }
+*/
 
-
-
-
+/*
 vector<int> compute_permutation(Grapher& grapher, Cudd& cudd, aiger* aiger_spec) {
-    /* Assumes the variables are already created. */
+    // Assumes the variables are already created.
 
     vector<pair<uint, uint>> freq_lit_vector;
     for (uint i = 0; i < aiger_spec->num_inputs; ++i) {
@@ -795,6 +786,7 @@ void print_set(SetUint& s, aiger* spec) {
     }
     cout << endl;
 }
+*/
 
 class Cleaner {
 public:
@@ -804,11 +796,112 @@ public:
 };
 
 
-bool Synth::run(const string& aiger_file_name, const string& output_file_name, uint time_limit_sec_) {
-    time_limit_sec = time_limit_sec_;
+void init_cudd(Cudd& cudd)
+{
     cudd.Srandom(827464282);  // for reproducibility (?)
     cudd.AutodynEnable(CUDD_REORDER_SIFT);
     cudd.EnableReorderingReporting();
+}
+
+
+/* something does not work here
+BDD compute_reachable(aiger* spec, BDD init_orig, hmap<unsigned,BDD>& transition_func_orig, BDD error_orig,
+                      Cudd& cudd_orig)
+{
+
+#define AIG_2_PRIM_IDX(aiger_lit)  (aiger_lit/2 + spec->num_latches)
+#define AIG_2_CUR_IDX(aiger_lit)  (aiger_lit/2)
+#define PRIM_IDX_2_AIG_LIT(aiger_lit)  (aiger_lit/2 + spec->num_inputs + spec->num_latches)
+#define CUR_IDX_2_AIG(aiger_lit)  (aiger_lit/2)
+
+    L_INF("compute_reachable...");
+    Cudd cudd2;
+    init_cudd(cudd2);
+
+    vector<BDD> _tmp;
+    for (uint i=0; i < spec->num_inputs + 2*spec->num_latches + 1; ++i)
+        _tmp.push_back(cudd2.bddVar(i));
+
+    VecUint permutation;
+    permutation.push_back(0);
+
+    for (uint i=0; i < spec->num_latches; ++i) {
+        permutation.push_back(AIG_2_CUR_IDX(spec->latches[i].lit));
+        permutation.push_back(AIG_2_PRIM_IDX(spec->latches[i].lit));
+    }
+
+    for (uint i=0; i < spec->num_inputs; ++i)
+        permutation.push_back(AIG_2_CUR_IDX(spec->inputs[i].lit));
+
+    for (auto c : permutation)
+        cout << c << endl;
+    cudd2.ShuffleHeap((int*)permutation.data());
+
+    for (uint i=1; i < spec->num_latches + 1; ++i)
+        cudd2.MakeTreeNode(i*2-1, 2, MTR_FIXED);
+
+    auto init = init_orig.Transfer(cudd2);
+
+    cout << "transferring error.." << endl;
+    auto error = error_orig.Transfer(cudd2);
+
+    cout << "computing trans rel .. " << endl;
+    auto trans_rel = cudd2.bddOne();
+    for (auto const& it : transition_func_orig) {
+        cout << "adding & for var" << it.first << endl;
+        auto newBdd = it.second.Transfer(cudd2);
+        trans_rel &= ~(cudd2.ReadVars(AIG_2_PRIM_IDX(it.first)).Xor(newBdd));  //aka: l' <-> bdd
+    }
+
+    vector<BDD> all_inputs;
+    for (uint i = 0; i < spec->num_inputs; ++i) {
+        auto aig_inp = spec->inputs[i];
+        all_inputs.push_back(cudd2.ReadVars(AIG_2_CUR_IDX(aig_inp.lit)));
+    }
+    auto all_inputs_cube = cudd2.bddComputeCube(all_inputs.data(), NULL, (int) all_inputs.size());
+
+    vector<BDD> all_cur_latches;
+    vector<BDD> all_prim_latches;
+    for (uint i = 0; i < spec->num_latches; ++i) {
+        auto aig_l = spec->latches[i];
+        all_cur_latches.push_back(cudd2.ReadVars(AIG_2_CUR_IDX(aig_l.lit)));
+        all_prim_latches.push_back(cudd2.ReadVars(AIG_2_PRIM_IDX(aig_l.lit)));  //i.e., normal idx multiplied by 2
+    }
+    auto all_cur_latches_cube = cudd2.bddComputeCube(all_cur_latches.data(), NULL, (int) all_cur_latches.size());
+
+    auto trans_not_err = trans_rel & ~error;
+    BDD curr;
+    BDD new_ = init;
+    do {
+        curr = new_;
+        cout << "another iteration.. is curr 1?" << (new_==cudd2.bddOne()) << endl;
+        // new_(l') = \exists u,c,l: curr(l) & trans(l,u,c,l') & ~error(l,u,c)
+        // new_(l') = \exists l: (curr(l) & (\exists u,c: (trans(l,u,c,l') & ~error(l,u,c))) )
+//        new_ = curr.AndAbstract(trans_rel.AndAbstract(~error, all_inputs_cube),
+//                                all_cur_latches_cube)
+//               .SwapVariables(all_prim_latches, all_cur_latches);
+        new_ = trans_not_err.AndAbstract(curr, all_cur_latches_cube & all_inputs_cube);
+        new_ = new_.SwapVariables(all_prim_latches, all_cur_latches);
+
+//        new_ = curr.AndAbstract(trans_rel.ExistAbstract(all_inputs_cube),
+//                                all_cur_latches_cube)
+//               .SwapVariables(all_prim_latches, all_cur_latches);
+    } while (new_ != curr);
+
+    L_INF("finished computing reachable states");
+    cout << (new_==cudd2.bddOne()) << ", size: " << new_.nodeCount() << endl;
+    L_INF("transferring it back..");
+    auto res = new_.Transfer(cudd_orig);
+    L_INF("finished transferring back!");
+    return res;
+}
+ */
+
+
+bool Synth::run(const string& aiger_file_name, const string& output_file_name, uint time_limit_sec_) {
+    time_limit_sec = time_limit_sec_;
+
+    init_cudd(cudd);
 
     aiger_spec = aiger_init();
     const char *err = aiger_open_and_read_from_file(aiger_spec, aiger_file_name.c_str());
@@ -817,8 +910,8 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
 
     // main part
                                                                     L_INF("synthesize.. number of vars = " << aiger_spec->num_inputs+aiger_spec->num_latches);
-    grapher = new Grapher();                                        timer.sec_restart();
-    grapher->compute_deps(aiger_spec);                              L_INF("calculating deps graph took (sec): " << timer.sec_restart());
+//    grapher = new Grapher();                                        timer.sec_restart();
+//    grapher->compute_deps(aiger_spec);                              L_INF("calculating deps graph took (sec): " << timer.sec_restart());
 
                                                                     //grapher.dump_dot();
                                                                     //print_set(grapher.deps[STRIP_LIT(aiger_spec->outputs[0].lit)], aiger_spec);
@@ -827,8 +920,6 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
     vector<BDD> _tmp;
     for (uint i=0; i < aiger_spec->num_inputs+aiger_spec->num_latches+1; ++i)
         _tmp.push_back(cudd.bddVar(i));
-
-//    Cudd_MakeTreeNode(cudd.getManager(), 35, 5, MTR_DEFAULT);
 
 //    vector<int> permutation = compute_permutation(grapher, cudd, aiger_spec);
 //    MASSERT(permutation.size() == (uint) cudd.ReadSize(), "");
@@ -879,10 +970,18 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
     cout << cudd.OrderString() << endl;
     exit(0);
     */
-                                                                timer.sec_restart();
-    compose_init_state_bdd();
+
+    compose_init_state_bdd();                                   timer.sec_restart();
     compose_transition_vector();                                L_INF("calc_trans_rel took (sec): " << timer.sec_restart());
     introduce_error_bdd();                                      L_INF("introduce_error_bdd took (sec): " << timer.sec_restart());
+
+//    cout << "before comput: nof_vars = " << cudd.ReadSize() << endl;
+//    reachable = compute_reachable(aiger_spec, init, transition_func, error, cudd);
+//    cout << "after comput: nof_vars = " << cudd.ReadSize() << endl;
+
+
+    // no need for cache
+    bdd_by_aiger_unlit.clear();
 
 //                                               reorder_opt(cudd);
 //                                               print_aiger_like_order(cudd);
@@ -905,23 +1004,30 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
 
     //cleaning non-used bdds
     win_region = cudd.bddZero();
-    transition_rel.clear();
+    transition_func.clear();
     init = cudd.bddZero();
     error = cudd.bddZero();
     //
 
-    vector<BDD> models = extract_output_funcs();                   L_INF("extract_output_funcs took (sec): " << timer.sec_restart());
-                                                                   L_INF("order_after_circuit_extraction: " << cudd.OrderString());
+    // TODO: set time limit on reordering? or even disable it if no time?
+    hmap<uint, BDD> model_by_cuddidx = extract_output_funcs();                   L_INF("extract_output_funcs took (sec): " << timer.sec_restart());
 
     //cleaning non-used bdds
     non_det_strategy = cudd.bddZero();
     //
 
-//    cudd.ReduceHeap(CUDD_REORDER_SIFT_CONVERGE);    // TODO: only if have enough time
+    auto elapsed_sec = time_limit_sec - timer.sec_from_origin();
+    if (elapsed_sec > 100) {    // leave 100sec just in case
+        auto spare_time_sec = elapsed_sec - 100;
+        cudd.ResetStartTime();
+        cudd.IncreaseTimeLimit((unsigned long) (spare_time_sec * 1000));
+        cudd.ReduceHeap(CUDD_REORDER_SIFT_CONVERGE);
+        cudd.UnsetTimeLimit();
+        cudd.AutodynDisable();  // just in case -- cudd hangs on timeout
+    }
 
-    vector<BDD> c_signals = get_controllable_vars_bdds();
-    for (uint i = 0; i < models.size(); ++i)
-        model_to_aiger(c_signals[i], models[i]);
+    for (auto const it : model_by_cuddidx)
+        model_to_aiger(cudd.ReadVars((int)it.first), it.second);
                                                                    L_INF("model_to_aiger took (sec): " << timer.sec_restart());
                                                                    L_INF("circuit size: " << (aiger_spec->num_ands + aiger_spec->num_latches));
     int res = 1;
@@ -937,9 +1043,9 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
 }
 
 Synth::~Synth() {
-    if (grapher)
-        delete(grapher);
-    grapher = NULL;
+//    if (grapher)
+//        delete(grapher);
+//    grapher = NULL;
 }
 
 
