@@ -55,11 +55,14 @@ private:
 
     unordered_map<unsigned, BDD> bdd_by_aiger_unlit;   // this is specially for amba2match benchmarks
 
+    unordered_map<unsigned, unsigned> cudd_by_aiger;   // mapping from aiger stripped literals to cudd indexes
+    unordered_map<unsigned, unsigned> aiger_by_cudd;   // mapping from cudd indexes to aiger stripped literals
+
 //    Grapher* grapher;   //pointer: let's keep class def secret from the compiler
 
 
 private:
-    BDD get_bdd_for_value(unsigned lit);
+    BDD get_bdd_for_sign_lit(unsigned lit);
 
     vector<BDD> get_controllable_vars_bdds();
     vector<BDD> get_uncontrollable_vars_bdds();

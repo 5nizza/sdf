@@ -115,7 +115,7 @@ public:
 
 
 
-BDD Synth::get_bdd_for_value(uint lit) {
+BDD Synth::get_bdd_for_sign_lit(uint lit) {
     /* lit is an AIGER variable index with a 'sign' */
 
     if (bdd_by_aiger_unlit.find(STRIP_LIT(lit)) != bdd_by_aiger_unlit.end()) {
@@ -132,12 +132,12 @@ BDD Synth::get_bdd_for_value(uint lit) {
     }
     else if (aiger_is_input(aiger_spec, stripped_lit) ||
              aiger_is_latch(aiger_spec, stripped_lit)) {
-        res = cudd.ReadVars(stripped_lit/2);  // internal cudd mapping (we don't need to create the var, so I use ReadVars)
-        MASSERT(res.NodeReadIndex() == stripped_lit/2, "that bug again: impossible: " << res.NodeReadIndex() << " vs " << stripped_lit/2 );
+        res = cudd.ReadVars(cudd_by_aiger[stripped_lit]);
+//        MASSERT(res.NodeReadIndex() == stripped_lit/2, "that bug again: impossible: " << res.NodeReadIndex() << " vs " << stripped_lit/2 );
     }
     else { // aiger_and
         aiger_and *and_ = aiger_is_and(aiger_spec, stripped_lit);
-        res = get_bdd_for_value(and_->rhs0) & get_bdd_for_value(and_->rhs1);
+        res = get_bdd_for_sign_lit(and_->rhs0) & get_bdd_for_sign_lit(and_->rhs1);
     }
 
     bdd_by_aiger_unlit[stripped_lit] = res;
@@ -151,7 +151,7 @@ vector<BDD> Synth::get_bdd_vars(bool(*filter_func)(char *)) {
     for (uint i = 0; i < aiger_spec->num_inputs; ++i) {
         aiger_symbol symbol = aiger_spec->inputs[i];
         if ((*filter_func)(symbol.name)) {
-            BDD out_var_bdd = get_bdd_for_value(symbol.lit);
+            BDD out_var_bdd = get_bdd_for_sign_lit(symbol.lit);
             result.push_back(out_var_bdd);
         }
     }
@@ -176,7 +176,7 @@ vector<BDD> Synth::get_uncontrollable_vars_bdds() {
 
 
 void Synth::introduce_error_bdd() {
-    error = get_bdd_for_value(aiger_spec->outputs[0].lit);
+    error = get_bdd_for_sign_lit(aiger_spec->outputs[0].lit);
 }
 
 
@@ -186,7 +186,7 @@ void Synth::compose_init_state_bdd() { // Initial state is 'all latches are zero
     init = cudd.bddOne();
 
     for (uint i = 0; i < aiger_spec->num_latches; i++) {
-        BDD latch_var = get_bdd_for_value(aiger_spec->latches[i].lit);
+        BDD latch_var = get_bdd_for_sign_lit(aiger_spec->latches[i].lit);
         init = init & ~latch_var;
     }
 }
@@ -196,17 +196,16 @@ void Synth::compose_transition_vector() {
     L_INF("compose_transition_vector..");
 
     for (uint i = 0; i < aiger_spec->num_latches; ++i)
-        transition_func[aiger_spec->latches[i].lit] = get_bdd_for_value(aiger_spec->latches[i].next);
+        transition_func[aiger_spec->latches[i].lit] = get_bdd_for_sign_lit(aiger_spec->latches[i].next);
 }
 
 
 vector<BDD> Synth::get_substitution() {
     vector<BDD> substitution;
 
-    substitution.push_back(cudd.ReadVars(0));   // special variable
-    for (uint i=1; i < (uint)cudd.ReadSize(); ++i) {
-        if (aiger_is_latch(aiger_spec, i*2))
-            substitution.push_back(transition_func.find(i*2)->second);
+    for (uint i = 0; i < (uint)cudd.ReadSize(); ++i) {
+        if (aiger_is_latch(aiger_spec, aiger_by_cudd[i]))
+            substitution.push_back(transition_func.find(aiger_by_cudd[i])->second);
         else
             substitution.push_back(cudd.ReadVars(i));
     }
@@ -321,7 +320,7 @@ get_group_candidates(const vector<VecUint >& orders,
     for (auto const & order : orders) {
         for (uint idx=0; idx < order.size() - window_size; ++idx) {
             SetUint sub_group(order.begin() + idx,
-                                              order.begin() + idx + window_size);
+                              order.begin() + idx + window_size);
             ++group_freq[sub_group];
         }
     }
@@ -418,7 +417,6 @@ void do_grouping(Cudd& cudd,
     for (auto const& g : groups_by_length[2]) {
         L_INF(string_set(g));
     }
-    cout << endl;
     L_INF("# of group candidates: of size 3 -- " << groups_by_length[3].size());
     for (auto const& g : groups_by_length[3]) {
         L_INF(string_set(g));
@@ -557,7 +555,7 @@ hmap<uint,BDD> Synth::extract_output_funcs()
     while (!controls.empty()) {
         BDD c = controls.back(); controls.pop_back();
 
-        aiger_symbol *aiger_input = aiger_is_input(aiger_spec, STRIP_LIT(c.NodeReadIndex()*2));
+        aiger_symbol *aiger_input = aiger_is_input(aiger_spec, aiger_by_cudd[c.NodeReadIndex()]);
         L_INF("getting output function for " << aiger_input->name);
 
         BDD c_arena;
@@ -662,9 +660,8 @@ uint Synth::walk(DdNode *a_dd) {
     if (Cudd_IsConstant(a_dd))
         return (uint) (a_dd == cudd.bddOne().getNode());  // in aiger: 0 is False and 1 is True
 
-    // get an index of variable,
-    // all variables used in BDDs are also present in AIGER
-    uint a_lit = Cudd_NodeReadIndex(a_dd)*2;
+    // get an index of the variable
+    uint a_lit = aiger_by_cudd[Cudd_NodeReadIndex(a_dd)];
 
     DdNode *t_bdd = Cudd_T(a_dd);
     DdNode *e_bdd = Cudd_E(a_dd);
@@ -699,7 +696,7 @@ uint Synth::walk(DdNode *a_dd) {
 
 /* Update aiger spec with a definition of `c_signal` */
 void Synth::model_to_aiger(const BDD &c_signal, const BDD &func) {
-    uint c_lit = c_signal.NodeReadIndex()*2;
+    uint c_lit = aiger_by_cudd[c_signal.NodeReadIndex()];
 
     uint func_as_aiger_lit = walk(func.getNode());
 
@@ -917,8 +914,20 @@ bool Synth::run(const string& aiger_file_name, const string& output_file_name, u
 
     // Create all variables. _tmp ensures that BDD have positive refs.
     vector<BDD> _tmp;
-    for (uint i = 0; i < aiger_spec->num_inputs + aiger_spec->num_latches + 1; ++i)
+    for (uint i = 0; i < aiger_spec->num_inputs + aiger_spec->num_latches; ++i)
         _tmp.push_back(cudd.bddVar(i));
+
+    for (uint i = 0; i < aiger_spec->num_inputs; ++i) {
+        auto aiger_strip_lit = aiger_spec->inputs[i].lit;
+        cudd_by_aiger[aiger_strip_lit] = i;
+        aiger_by_cudd[i] = aiger_strip_lit;
+    }
+    for (uint i = 0; i < aiger_spec->num_latches; ++i) {
+        auto aiger_strip_lit = aiger_spec->latches[i].lit;
+        auto cudd_idx = i + aiger_spec->num_inputs;
+        cudd_by_aiger[aiger_strip_lit] = cudd_idx;
+        aiger_by_cudd[cudd_idx] = aiger_strip_lit;
+    }
 
 //    vector<int> permutation = compute_permutation(grapher, cudd, aiger_spec);
 //    MASSERT(permutation.size() == (uint) cudd.ReadSize(), "");

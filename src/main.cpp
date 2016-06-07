@@ -24,6 +24,7 @@ int main (int argc, char *argv[]) {
 
     input_file_name = argv[1];
 
+    string output_file_name = "stdout";
 //    if (argc == 4) {
 //        if (string(argv[2]) != "-o")
 //            print_usage_exit();
@@ -38,7 +39,7 @@ int main (int argc, char *argv[]) {
     // end of logger setup
 
     Synth synthesizer;
-    bool is_realizable = synthesizer.run(input_file_name, "stdout");   // TODO: stdout does not work..
+    bool is_realizable = synthesizer.run(input_file_name, output_file_name);   // TODO: stdout does not work..
 
     return is_realizable? 10:20;
 }
