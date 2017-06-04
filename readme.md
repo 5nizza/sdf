@@ -1,7 +1,7 @@
 The safety synthesis tool submitted to the SYNTCOMP.
 Dependencies:
 
-- modifed aiger-1.9.4.
+- modifed aiger-1.9.4, get it from [https://github.com/5nizza/aisy/tree/master/aiger_swig](https://github.com/5nizza/aisy/tree/master/aiger_swig)
 - cudd-3.0.0
 - spdlog
 
@@ -15,4 +15,4 @@ Use the standard cmake routine for building:
 - `cmake ..`
 - `make`
 
-Feel free to ask me questions, since the tool is raw.
+Feel free to ask me questions, the tool is raw.
