@@ -4,15 +4,17 @@
 #include <spdlog/spdlog.h>
 
 #include "Synth.hpp"
-#include "ArgsParser.h"
+#include "ArgsParser.hpp"
 
 
 using namespace std;
 
 
 void print_usage_exit() {
-    cout << "<tool> <input_aiger_file> [-f]" << endl;
-    cout << "Use flag -f if you want a full model (with outputs defined along with the `bad` output)" << endl;
+    cout << "<tool> <input_aiger_file> [-f] [-v]" << endl
+         << "-f   you want a full model" << endl
+         << "     (with outputs defined along with the `bad` output)" << endl
+         << "-v   verbose output (default silent)" << endl;
     exit(0);
 }
 
@@ -31,10 +33,11 @@ int main (int argc, char *argv[]) {
     // setup logging
     auto console = spdlog::stdout_logger_mt("console", false);
     spdlog::set_pattern("%H:%M:%S %v ");
-    //spdlog::set_level(spdlog::level::off);
+    if (!parser.cmdOptionExists("-v"))
+        spdlog::set_level(spdlog::level::off);
     // end of logger setup
 
-    Synth synthesizer(input_file_name, output_file_name, print_full_model, 3600);  // TODO: stdout does not work..
+    Synth synthesizer(input_file_name, output_file_name, print_full_model, 3600);
     bool is_realizable = synthesizer.run();
 
     return is_realizable? 10:20;

@@ -34,7 +34,3 @@ target_link_libraries(${PROJECT}-debug ${AIGER_LIBRARIES})
 target_link_libraries(${PROJECT}-debug ${CUDD_LIBRARIES})
 set_target_properties(${PROJECT}-debug PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -fPIC")
 
-add_executable(rm_bad ${project_SRC} rm_bad)
-target_link_libraries(rm_bad ${AIGER_LIBRARIES})
-set_target_properties(rm_bad PROPERTIES COMPILE_FLAGS "${COMPILE_FLAGS} -fPIC")
-
