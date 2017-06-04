@@ -267,17 +267,17 @@ VecUint get_order(Cudd &cudd) {
     return order;
 }
 
-string string_vector(const VecUint& v) {
-    stringstream ss;
-    for(size_t i = 0; i < v.size(); ++i)
-    {
-        if(i != 0)
-            ss << ",";
-        ss << v[i];
-    }
-    return ss.str();
-}
-
+//string string_vector(const VecUint& v) {
+//    stringstream ss;
+//    for(size_t i = 0; i < v.size(); ++i)
+//    {
+//        if(i != 0)
+//            ss << ",";
+//        ss << v[i];
+//    }
+//    return ss.str();
+//}
+//
 string string_set(const SetUint& v) {
     stringstream ss;
     for(auto const el : v)
@@ -303,11 +303,11 @@ bool do_intersect(const SetUint& s1, const SetUint& s2) {
     return false;
 }
 
-SetUint union_sets(const SetUint& s1, const SetUint& s2) {
-    SetUint merged(s1.begin(), s1.end());
-    merged.insert(s2.begin(), s2.end());
-    return merged;
-}
+//SetUint union_sets(const SetUint& s1, const SetUint& s2) {
+//    SetUint merged(s1.begin(), s1.end());
+//    merged.insert(s2.begin(), s2.end());
+//    return merged;
+//}
 
 
 vector<SetUint>
@@ -604,7 +604,9 @@ hmap<uint,BDD> Synth::extract_output_funcs()
         //killing node refs
         c_must_be_false = c_must_be_true = c_can_be_false = c_can_be_true = c_arena = cudd.bddZero();
 
+        //TODO: ak: strange -- the python version for the example amba_02_9n produces a smaller circuit (~5-10 times)!
         non_det_strategy = non_det_strategy.Compose(c_model, c.NodeReadIndex());
+        //non_det_strategy = non_det_strategy & ((c & c_model) | (~c & ~c_model));
     }
 
     return model_by_cuddidx;
@@ -704,7 +706,7 @@ void Synth::model_to_aiger(const BDD &c_signal, const BDD &func) {
 }
 
 
-bool first_cmp (pair<uint, uint> a, pair<uint, uint> b) { return (a.first > b.first); /* > means often-first */ }
+//bool first_cmp (pair<uint, uint> a, pair<uint, uint> b) { return (a.first > b.first); /* > means often-first */ }
 
 /*
 void print_order_frequencies(Grapher& grapher, Cudd& cudd, aiger* aiger_spec) {
@@ -894,9 +896,7 @@ BDD compute_reachable(aiger* spec, BDD init_orig, hmap<unsigned,BDD>& transition
  */
 
 
-bool Synth::run(const string& aiger_file_name, const string& output_file_name, uint time_limit_sec_) {
-    time_limit_sec = time_limit_sec_;
-
+bool Synth::run() {
     init_cudd(cudd);
 
     aiger_spec = aiger_init();

@@ -16,9 +16,9 @@ include_directories("${CUDD_INCLUDE_DIR}")
 # set the default build type to 'debug'.
 SET(CMAKE_BUILD_TYPE Debug CACHE STRING "default to debug" FORCE)
 
-add_library(${PROJECT}
-            STATIC
-            ${project_SRC})
+#add_library(${PROJECT}
+#            STATIC
+#            ${project_SRC} ArgsParser.h)
 
 #target_link_libraries(${PROJECT} ${CUDD_LIBRARIES})
 
