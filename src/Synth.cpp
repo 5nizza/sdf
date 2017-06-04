@@ -540,15 +540,14 @@ BDD Synth::get_nondet_strategy() {
 }
 
 
-hmap<uint,BDD> Synth::extract_output_funcs()
-{
+hmap<uint,BDD> Synth::extract_output_funcs() {
     /** The result vector respects the order of the controllable variables **/
 
     L_INF("extract_output_funcs..");
 
     cudd.FreeTree();    // ordering that worked for win region computation might not work here
 
-    hmap<unsigned,BDD> model_by_cuddidx;
+    hmap<uint,BDD> model_by_cuddidx;
 
     vector<BDD> controls = get_controllable_vars_bdds();
 
@@ -696,13 +695,18 @@ uint Synth::walk(DdNode *a_dd) {
 }
 
 
-/* Update aiger spec with a definition of `c_signal` */
 void Synth::model_to_aiger(const BDD &c_signal, const BDD &func) {
+    /// Update AIGER spec with a definition of `c_signal`
+
     uint c_lit = aiger_by_cudd[c_signal.NodeReadIndex()];
+    string output_name = string(aiger_is_input(aiger_spec, c_lit)->name);  // save the name before it is freed
 
     uint func_as_aiger_lit = walk(func.getNode());
 
     aiger_redefine_input_as_and(aiger_spec, c_lit, func_as_aiger_lit, func_as_aiger_lit);
+
+    if (print_full_model)
+        aiger_add_output(aiger_spec, c_lit, output_name.c_str());
 }
 
 
@@ -1064,5 +1068,3 @@ Synth::~Synth() {
 //        delete(grapher);
 //    grapher = NULL;
 }
-
-

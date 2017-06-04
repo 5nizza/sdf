@@ -12,7 +12,7 @@ using namespace std;
 
 void print_usage_exit() {
     cout << "<tool> <input_aiger_file> [-f]" << endl;
-    cout << "Use flag -f if you need pure full models (with outputs defined and `bad` output removed)" << endl;
+    cout << "Use flag -f if you want a full model (with outputs defined along with the `bad` output)" << endl;
     exit(0);
 }
 
