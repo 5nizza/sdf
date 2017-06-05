@@ -443,7 +443,6 @@ void update_order_if(Cudd& cudd, vector<VecUint >& orders)
 }
 
 
-
 BDD Synth::pre_sys(BDD dst) {
     /**
     Calculate predecessor states of given states.
@@ -453,6 +452,10 @@ BDD Synth::pre_sys(BDD dst) {
     We use the direct substitution optimization (since t' <-> BDD(t,u,c)), thus:
 
         ∀u ∃c: (!error(t,u,c)  &  (dst(t)[t <- bdd_next_t(t,u,c)]))
+
+    or for Moore machines:
+
+        ∃c ∀u: (!error(t,u,c)  &  (dst(t)[t <- bdd_next_t(t,u,c)]))
 
     Note that we do not replace t variables in the error bdd.
 
@@ -474,15 +477,40 @@ BDD Synth::pre_sys(BDD dst) {
 
     dst = dst.VectorCompose(get_substitution());                                update_order_if(cudd, orders);
 
+    if (is_moore) {
+        BDD result = dst.And(~error);
+
+        vector<BDD> uncontrollable = get_uncontrollable_vars_bdds();
+        if (!uncontrollable.empty()) {
+            BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(),
+                                                          NULL,
+                                                          (int)uncontrollable.size());
+            result = result.UnivAbstract(uncontrollable_cube);                  update_order_if(cudd, orders);
+        }
+
+        // ∃c ∀u  (...)
+        vector<BDD> controllable = get_controllable_vars_bdds();
+        BDD controllable_cube = cudd.bddComputeCube(controllable.data(),
+                                                    NULL,
+                                                    (int)controllable.size());
+        result = result.ExistAbstract(controllable_cube);                       update_order_if(cudd, orders);
+        return result;
+    }
+
+    // the case of Mealy machines
     vector<BDD> controllable = get_controllable_vars_bdds();
-    BDD vars_cube = cudd.bddComputeCube(controllable.data(), NULL, (int) controllable.size());
-    BDD result = dst.AndAbstract(~error, vars_cube);                            update_order_if(cudd, orders);
+    BDD controllable_cube = cudd.bddComputeCube(controllable.data(),
+                                                NULL,
+                                                (int)controllable.size());
+    BDD result = dst.AndAbstract(~error, controllable_cube);                   update_order_if(cudd, orders);
 
     vector<BDD> uncontrollable = get_uncontrollable_vars_bdds();
     if (!uncontrollable.empty()) {
         // ∀u ∃c (...)
-        BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(), NULL, (int) uncontrollable.size());
-        result = result.UnivAbstract(uncontrollable_cube);                      update_order_if(cudd, orders);
+        BDD uncontrollable_cube = cudd.bddComputeCube(uncontrollable.data(),
+                                                      NULL,
+                                                      (int)uncontrollable.size());
+        result = result.UnivAbstract(uncontrollable_cube);                    update_order_if(cudd, orders);
     }
     return result;
 }
@@ -641,14 +669,15 @@ uint Synth::get_optimized_and_lit(uint a_lit, uint b_lit) {
 }
 
 
-/*
-Walk given DdNode node (recursively).
-If a given node requires intermediate AND gates for its representation, the function adds them.
-    Literal representing given input node is `not` added to the spec.
-
-:returns: literal representing input node
-*/
 uint Synth::walk(DdNode *a_dd) {
+    /**
+    Walk given DdNode node (recursively).
+    If a given node requires intermediate AND gates for its representation, the function adds them.
+        Literal representing given input node is `not` added to the spec.
+
+    :returns: literal representing input node
+    **/
+
     // caching
     static hmap<DdNode*, uint> cache;
     {
@@ -686,7 +715,7 @@ uint Synth::walk(DdNode *a_dd) {
 
     uint res = NEGATED(and_lit);
 
-    cache[Cudd_Regular(a_dd)] = res;  // caching
+    cache[Cudd_Regular(a_dd)] = res;
 
     if (Cudd_IsComplement(a_dd))
         res = NEGATED(res);

@@ -31,10 +31,12 @@ class Synth {
 
 public:
     /// NOTE: time_limit_sec is used for heuristics (I won't stop on reaching it)
-    Synth(const string &aiger_file_name_,
+    Synth(bool is_moore_,
+          const string &aiger_file_name_,
           const string &output_file_name_,
           bool print_full_model_,
           unsigned time_limit_sec_=3600):
+            is_moore(is_moore_),
             aiger_file_name(aiger_file_name_),
             output_file_name(output_file_name_),
             print_full_model(print_full_model_),
@@ -51,6 +53,7 @@ private:
 
 
 private:
+    const bool is_moore;
     const string aiger_file_name;
     const string output_file_name;
     const bool print_full_model;
